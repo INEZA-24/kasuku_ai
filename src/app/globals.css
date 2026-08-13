@@ -263,6 +263,33 @@ section {
   font-weight: 700;
 }
 
+.conversation-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.clear-button {
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent-dark);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.clear-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.clear-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .conversation-canvas {
   display: grid;
   min-height: 290px;
@@ -321,28 +348,85 @@ section {
   animation: spin 800ms linear infinite;
 }
 
-.interpretation-result {
-  width: min(100%, 680px);
-  padding: 24px;
-  border-left: 3px solid var(--accent);
+.conversation-history {
+  display: grid;
+  width: min(100%, 760px);
+  align-self: stretch;
+  gap: 24px;
+  margin: 0 auto;
+  padding: 0;
+  list-style: none;
+}
+
+.conversation-turn article {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.message-bubble {
+  width: min(88%, 560px);
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 15px 15px 15px 4px;
+  background: #f4f1e9;
+}
+
+.conversation-turn[data-speaker-side="participant-one"] .original-message,
+.conversation-turn[data-speaker-side="participant-two"] .interpreted-message {
+  align-self: flex-start;
+}
+
+.conversation-turn[data-speaker-side="participant-one"] .interpreted-message,
+.conversation-turn[data-speaker-side="participant-two"] .original-message {
+  align-self: flex-end;
+  border-radius: 15px 15px 4px;
+}
+
+.interpreted-message {
+  border-color: #bdd3c6;
   background: var(--accent-soft);
 }
 
-.result-label {
-  margin-bottom: 14px;
-  color: var(--accent-dark);
-  font-size: 0.7rem;
+.message-label {
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 0.65rem;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 
-.result-text {
+.interpreted-message .message-label {
+  color: var(--accent-dark);
+}
+
+.message-text {
   margin-bottom: 0;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(1.25rem, 5vw, 1.75rem);
-  line-height: 1.45;
+  line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+.interpreted-text {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.1rem;
+}
+
+.history-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.history-loading .loading-indicator {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  border-width: 2px;
 }
 
 .composer {

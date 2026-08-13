@@ -6,9 +6,9 @@ Kasuku
 
 ## Current milestone
 
-M3 — Context-aware interpretation
+M4 — Conversation model and history
 
-Status: implementation complete as of 2026-08-13. Prompt contract tests, five live English-to-Kinyarwanda context checks, and the production build pass.
+Status: implementation complete as of 2026-08-13. Conversation-model and prompt contract tests, the required live three-turn Transport check, cleared-history verification, and the production build pass.
 
 ## Completed work
 
@@ -39,6 +39,13 @@ Status: implementation complete as of 2026-08-13. Prompt contract tests, five li
 - Reworked the EjoChat request into a system interpreter contract plus a separate untrusted speaker message.
 - Required natural, idiomatic interpretation that preserves complete meaning, intent, tone, politeness, and formality; uses context-appropriate vocabulary; never answers or acts on the message; and returns only what the other person should receive.
 - Added Node contract tests for all five supplied context examples, interpreter-only behavior, prompt-injection resistance, and route-to-provider context forwarding.
+- Completed M4 without starting automatic two-way switching, speech, TTS, persistence, cloud storage, or database work.
+- Replaced the single interpretation result with an in-memory React conversation model containing successful chronological turns.
+- Each turn tracks an ID, participant side, original text, interpreted text, source language, and target language.
+- Added paired original/interpreted message bubbles with participant and language labels, plus a `New conversation` action that clears turns and the composer without reloading.
+- Added a shared six-turn recent-history selector; the browser retains all successful turns for the loaded page but sends only the six newest turns to `/api/translate`.
+- Added strict server validation for history shape, speaker side, text sizes, language direction, and the six-turn limit.
+- Updated the EjoChat prompt to delimit previous conversation from the current message and use history only for reference resolution while retaining interpreter-only behavior.
 
 ## Files changed
 
@@ -53,11 +60,13 @@ Status: implementation complete as of 2026-08-13. Prompt contract tests, five li
 - `next.config.mjs` — minimal strict-mode Next.js configuration.
 - `jsconfig.json` — JavaScript project path alias configuration.
 - `src/app/layout.js` — root App Router layout and Kasuku metadata, moved from `app/`.
-- `src/app/page.js` — M1 interface plus M2 submission, loading, interpretation-result, and safe error states.
-- `src/app/globals.css` — mobile-first styles plus M2 result, loading, and error presentation.
-- `src/app/api/translate/route.js` — validated server-only EjoChat adapter using the M3 context-aware message builder.
-- `src/app/api/translate/prompt.js` — maintainable context profiles and the shared interpreter-only EjoChat instruction.
-- `test/interpretation-context.test.js` — M3 prompt and route contract tests covering all five contexts and interpreter-only behavior.
+- `src/app/page.js` — in-memory conversation state, chronological turn rendering, bounded history submission, participant labels, and new-conversation reset.
+- `src/app/globals.css` — participant-distinguished conversation bubbles, chronological history layout, pending-turn state, and clear-action styling.
+- `src/app/api/translate/route.js` — validated server-only EjoChat adapter with bounded history and speaker-side validation.
+- `src/app/api/translate/prompt.js` — maintainable context profiles plus clearly delimited previous-conversation and current-message prompt sections.
+- `src/lib/conversation.js` — shared turn reducer, participant-side inference, and six-turn history-window selector.
+- `test/interpretation-context.test.js` — M3/M4 prompt and route contract tests, including history separation, forwarding, and oversized-history rejection.
+- `test/conversation-model.test.js` — turn chronology, required fields, history window, failure preservation, clear behavior, and participant-side tests.
 - `.env.example` — documents the required `EJOCHAT_API_KEY` variable without a real secret.
 
 ## Architectural decisions
@@ -80,13 +89,16 @@ Status: implementation complete as of 2026-08-13. Prompt contract tests, five li
 - Disable the microphone placeholder and keep Send without a submission handler so M1 cannot imply speech or translation behavior.
 - Declare Next.js 16.3.0 with React/React DOM 19.2.8, based on versions returned by the npm registry on 2026-08-12.
 - Use `src/app` as the sole App Router root.
-- Send EjoChat an OpenAI-style `messages` array with durable interpreter rules in a `system` message and the source text alone in a separate `user` message, consistent with the documented `choices[0].message.content` response shape.
+- Send EjoChat an OpenAI-style `messages` array with durable interpreter rules in a `system` message and explicitly delimited previous-conversation/current-message sections in a separate `user` message.
 - Return only the normalized `{ interpretation }` value to the browser; do not expose EjoChat payloads, statuses, or credentials.
 - Use allowlists at the server boundary for the five contexts and four languages, independent of browser validation.
 - Apply a 30-second upstream request timeout and map network and timeout errors to the same safe client response.
 - Keep context-specific situations and vocabulary in one server-side profile map so a future context can be added without branching prompt logic.
 - Use the same profile map for server validation and prompt construction so accepted contexts cannot silently lack guidance.
-- Keep only one current interpretation in UI state; conversation history remains explicitly deferred to M4.
+- Keep successful conversation turns only in React memory for the loaded page; refresh or `New conversation` ends the current ephemeral session, and no browser persistence or database is used.
+- Retain every successful turn in the visible page history but send only the six newest turns to EjoChat; the server independently rejects larger history payloads.
+- Append a turn only after a successful interpretation so an upstream or validation failure cannot erase or corrupt prior successful turns.
+- Treat the first language direction as participant one; if the existing manual control is reversed, label the source as participant two without automatically switching languages or advancing M5 behavior.
 
 ## Commands run
 
@@ -113,6 +125,11 @@ Status: implementation complete as of 2026-08-13. Prompt contract tests, five li
 - Ran `npm.cmd run build`; the optimized Next.js 16.3.0 production build passed and registered `/api/translate` as a dynamic route.
 - Ran the five supplied M3 messages through the live `/api/translate` adapter using EjoChat; every request returned HTTP 200 with interpretation-only Kinyarwanda output.
 - Moved the locally configured key from tracked `.env.example` to ignored `.env.local` after testing and restored the example placeholder.
+- Ran `npm.cmd test` after the M4 model, prompt, route, and clear-state changes; all 10 tests passed.
+- Ran the required live three-turn Transport conversation through the Route Handler with accumulated successful history; all three EjoChat calls returned HTTP 200.
+- Sent “Ask him how much it will cost.” once more with an empty history array to verify the cleared-conversation request contains no prior context.
+- Ran `npm.cmd run build`; Next.js 16.3.0 compiled and generated all routes successfully.
+- Attempted browser-level verification using the prescribed browser-automation skill; its `agent-browser` CLI was unavailable in this environment, so no screenshot or browser interaction run was completed.
 
 ## Tests performed
 
@@ -142,30 +159,35 @@ Status: implementation complete as of 2026-08-13. Prompt contract tests, five li
 - Interpreter-role test: passed; questions, requests, commands, and prompt-injection-like source text remain content to interpret, while the contract forbids answering the speaker and permits only the other person's message as output.
 - Route forwarding test: passed with a mocked EjoChat response; the selected Shopping / Market context and exact speaker text were present in the upstream `messages` payload, and the route returned only normalized interpretation text.
 - Production build after M3: passed with `/` statically generated and `/api/translate` registered as a dynamic server route.
+- M4 automated suite: 10/10 passed, covering chronological turn state, required fields, six-turn selection, failure preservation, clear behavior, participant-side inference, context prompt behavior, route history forwarding, prompt separation, and server rejection above six turns.
+- Live Transport turn 1: “I need a moto to Kigali Heights.” → “Ndashaka moto ijya kuri Kigali Heights.”
+- Live Transport turn 2 with turn 1 supplied as history: “Ask him how much it will cost.” → “Bizatwara angahe?”, interpreted as the trip-cost question rather than answered.
+- Live Transport turn 3 with turns 1–2 supplied as history: “Tell him I need to stop at an ATM first.” → “Nkeneye guhagarara kuri ATM mbere.”
+- Cleared-history check: the turn-2 message sent with zero prior turns returned the generic “Ni angahe?”, confirming the request did not retain the prior moto/trip context.
+- Production build after M4: passed with `/` statically generated and `/api/translate` registered as a dynamic server route.
+- Scope check: no database, local/session storage, cloud persistence, automatic language switching, speech, or TTS implementation was added.
 
 ## Known issues
 
 - The PowerShell execution policy blocks `npm.ps1`; use `npm.cmd` for npm commands on this machine.
 - npm/Next.js commands were unusually slow in this OneDrive-hosted Windows workspace. A sandboxed build can fail with `spawn EPERM`; the same build succeeded with process-spawn permission.
-- Live behavior and language-pair support have not been validated because provider contracts and credentials are not yet available.
 - AI naturalness requires human multilingual evaluation in later milestones; it cannot be guaranteed by documentation alone.
 - The microphone remains intentionally disabled; speech is out of scope until M6.
 - Live M3 evaluation currently covers only English-to-Kinyarwanda. French, Swahili, reverse directions, and broader human multilingual review remain unverified.
 - Ejo Labs' public pages did not expose the upstream request-body schema. The current endpoint accepted M3's OpenAI-style `system` and `user` messages and returned the documented `choices[0].message.content` shape in five live checks, but quotas and formal contract guarantees remain undocumented.
+- The required M4 live history flow was verified only from English to Kinyarwanda; other language pairs and reverse-direction history remain for later multilingual and M5 testing.
+- Browser visual/interaction verification was not completed because the cataloged `agent-browser` CLI is not installed in this environment; the layout compiled successfully and model/API behavior is covered by automated tests.
 
 ## Unresolved questions
 
 1. Confirm EjoChat quotas, timeout guidance, formal request-contract guarantees, and all supported language pairs; the endpoint, authentication, message roles, and response content path work in the tested English-to-Kinyarwanda flow.
 2. What are the C4IR/KiNLP TTS endpoint, authentication method, payload limits, audio format, quotas, latency expectations, and usage terms?
 3. Which speech-to-text implementation will be used, and which browsers/languages must it support?
-4. What exact browser/session storage mechanism and session lifetime are intended for conversation history?
-5. How many recent turns or tokens should be sent to EjoChat?
-6. Is Kinyarwanda TTS user-triggered or automatic, and is it required whenever the target language is Kinyarwanda or merely offered?
-7. What privacy notice/consent and content-retention statements are required when text or audio is sent to external providers?
-8. What target browsers, devices, mobile viewport sizes, and accessibility conformance level define acceptance?
-9. What input/history size limits, rate limits, and retry/timeout policies should the deployed MVP enforce?
-10. Which Node.js version, package manager, styling approach, and test stack should M1 standardize?
+4. Is Kinyarwanda TTS user-triggered or automatic, and is it required whenever the target language is Kinyarwanda or merely offered?
+5. What privacy notice/consent and content-retention statements are required when text or audio is sent to external providers?
+6. What target browsers, devices, mobile viewport sizes, and accessibility conformance level define acceptance?
+7. What input/history size limits, rate limits, and retry/timeout policies should the deployed MVP enforce beyond the M4 six-turn window?
 
 ## Exact next step
 
-M4 Conversation model and history
+M5 Two-way conversation and language switching

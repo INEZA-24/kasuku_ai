@@ -1,6 +1,12 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useReducer, useState } from "react";
+
+import {
+  conversationReducer,
+  inferSpeakerSide,
+  selectRecentHistory,
+} from "../lib/conversation.js";
 
 const contexts = [
   { name: "Transport", icon: "↗" },
@@ -35,13 +41,19 @@ export default function Home() {
   const [sourceLanguage, setSourceLanguage] = useState("English");
   const [targetLanguage, setTargetLanguage] = useState("Kinyarwanda");
   const [message, setMessage] = useState("");
-  const [interpretation, setInterpretation] = useState("");
+  const [turns, dispatchConversation] = useReducer(conversationReducer, []);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
   function swapLanguages() {
     setSourceLanguage(targetLanguage);
     setTargetLanguage(sourceLanguage);
+  }
+
+  function startNewConversation() {
+    dispatchConversation({ type: "clear" });
+    setMessage("");
+    setError("");
   }
 
   async function submitMessage(event) {
@@ -61,7 +73,12 @@ export default function Home() {
 
     setIsLoading(true);
     setError("");
-    setInterpretation("");
+
+    const speakerSide = inferSpeakerSide(
+      turns,
+      sourceLanguage,
+      targetLanguage,
+    );
 
     try {
       const response = await fetch("/api/translate", {
@@ -72,6 +89,8 @@ export default function Home() {
           sourceLanguage,
           targetLanguage,
           context,
+          speakerSide,
+          history: selectRecentHistory(turns),
         }),
       });
 
@@ -85,7 +104,18 @@ export default function Home() {
         throw new Error("Interpretation failed. Please try again.");
       }
 
-      setInterpretation(data.interpretation);
+      dispatchConversation({
+        type: "add",
+        turn: {
+          id: globalThis.crypto.randomUUID(),
+          speakerSide,
+          originalText: trimmedMessage,
+          interpretedText: data.interpretation.trim(),
+          sourceLanguage,
+          targetLanguage,
+        },
+      });
+      setMessage("");
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -195,25 +225,69 @@ export default function Home() {
             <p className="eyebrow">03</p>
             <h2 id="conversation-heading">Conversation</h2>
           </div>
-          <p className="direction-label">
-            <span>{sourceLanguage}</span>
-            <span aria-hidden="true">→</span>
-            <span>{targetLanguage}</span>
-          </p>
+          <div className="conversation-actions">
+            <p className="direction-label">
+              <span>{sourceLanguage}</span>
+              <span aria-hidden="true">→</span>
+              <span>{targetLanguage}</span>
+            </p>
+            <button
+              className="clear-button"
+              type="button"
+              onClick={startNewConversation}
+              disabled={!turns.length || isLoading}
+            >
+              New conversation
+            </button>
+          </div>
         </div>
 
         <div className="conversation-canvas" aria-live="polite" aria-busy={isLoading}>
-          {isLoading ? (
+          {turns.length ? (
+            <ol className="conversation-history" aria-label="Conversation history">
+              {turns.map((turn) => {
+                const speakerNumber =
+                  turn.speakerSide === "participant-one" ? "1" : "2";
+                const listenerNumber = speakerNumber === "1" ? "2" : "1";
+
+                return (
+                  <li
+                    className="conversation-turn"
+                    data-speaker-side={turn.speakerSide}
+                    key={turn.id}
+                  >
+                    <article>
+                      <div className="message-bubble original-message">
+                        <p className="message-label">
+                          Participant {speakerNumber} · {turn.sourceLanguage}
+                        </p>
+                        <p className="message-text">{turn.originalText}</p>
+                      </div>
+                      <div className="message-bubble interpreted-message">
+                        <p className="message-label">
+                          For participant {listenerNumber} · {turn.targetLanguage}
+                        </p>
+                        <p className="message-text interpreted-text">
+                          {turn.interpretedText}
+                        </p>
+                      </div>
+                    </article>
+                  </li>
+                );
+              })}
+              {isLoading ? (
+                <li className="history-loading" role="status">
+                  <span className="loading-indicator" aria-hidden="true" />
+                  <span>Interpreting the next message…</span>
+                </li>
+              ) : null}
+            </ol>
+          ) : isLoading ? (
             <div className="status-state">
               <span className="loading-indicator" aria-hidden="true" />
               <h3>Interpreting your message</h3>
               <p>Keeping the meaning and tone natural.</p>
             </div>
-          ) : interpretation ? (
-            <article className="interpretation-result">
-              <p className="result-label">Interpretation · {targetLanguage}</p>
-              <p className="result-text">{interpretation}</p>
-            </article>
           ) : (
             <div className="empty-state">
               <span className="empty-symbol" aria-hidden="true">“</span>

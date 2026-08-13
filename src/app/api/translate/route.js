@@ -2,6 +2,10 @@ import {
   createInterpretationMessages,
   isSupportedContext,
 } from "./prompt.js";
+import {
+  RECENT_HISTORY_LIMIT,
+  SPEAKER_SIDES,
+} from "../../../lib/conversation.js";
 
 const EJOCHAT_URL = "https://api.ejolabs.com/api/v1/subiza";
 
@@ -13,9 +17,60 @@ const ALLOWED_LANGUAGES = new Set([
 ]);
 
 const MAX_MESSAGE_LENGTH = 2000;
+const MAX_INTERPRETATION_LENGTH = 4000;
 
 function errorResponse(error, status) {
   return Response.json({ error }, { status });
+}
+
+function validateHistory(history) {
+  if (history === undefined) {
+    return null;
+  }
+
+  if (!Array.isArray(history)) {
+    return "Conversation history must be an array.";
+  }
+
+  if (history.length > RECENT_HISTORY_LIMIT) {
+    return `Conversation history must contain ${RECENT_HISTORY_LIMIT} turns or fewer.`;
+  }
+
+  for (const turn of history) {
+    if (!turn || typeof turn !== "object" || Array.isArray(turn)) {
+      return "Conversation history contains an invalid turn.";
+    }
+
+    if (!SPEAKER_SIDES.includes(turn.speakerSide)) {
+      return "Conversation history contains an invalid speaker side.";
+    }
+
+    if (
+      typeof turn.originalText !== "string" ||
+      !turn.originalText.trim() ||
+      turn.originalText.trim().length > MAX_MESSAGE_LENGTH
+    ) {
+      return "Conversation history contains invalid original text.";
+    }
+
+    if (
+      typeof turn.interpretedText !== "string" ||
+      !turn.interpretedText.trim() ||
+      turn.interpretedText.trim().length > MAX_INTERPRETATION_LENGTH
+    ) {
+      return "Conversation history contains invalid interpreted text.";
+    }
+
+    if (
+      !ALLOWED_LANGUAGES.has(turn.sourceLanguage) ||
+      !ALLOWED_LANGUAGES.has(turn.targetLanguage) ||
+      turn.sourceLanguage === turn.targetLanguage
+    ) {
+      return "Conversation history contains an invalid language direction.";
+    }
+  }
+
+  return null;
 }
 
 function validateRequestBody(body) {
@@ -47,6 +102,19 @@ function validateRequestBody(body) {
 
   if (!isSupportedContext(context)) {
     return "Choose a supported conversation context.";
+  }
+
+  if (
+    body.speakerSide !== undefined &&
+    !SPEAKER_SIDES.includes(body.speakerSide)
+  ) {
+    return "Choose a supported speaker side.";
+  }
+
+  const historyError = validateHistory(body.history);
+
+  if (historyError) {
+    return historyError;
   }
 
   return null;
@@ -86,7 +154,11 @@ export async function POST(request) {
         "X-API-Key": apiKey,
       },
       body: JSON.stringify({
-        messages: createInterpretationMessages(body),
+        messages: createInterpretationMessages({
+          ...body,
+          history: body.history ?? [],
+          speakerSide: body.speakerSide ?? "participant-one",
+        }),
       }),
       cache: "no-store",
       signal: AbortSignal.timeout(30000),
