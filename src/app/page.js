@@ -1,6 +1,8 @@
 "use client";
 
-import { useId, useReducer, useState } from "react";
+import { useCallback, useId, useReducer, useState } from "react";
+
+import { useSpeechRecognition } from "../hooks/use-speech-recognition.js";
 
 import {
   conversationReducer,
@@ -9,6 +11,7 @@ import {
   selectRecentHistory,
   SPEAKER_LABELS,
 } from "../lib/conversation.js";
+import { mergeSpeechTranscript } from "../lib/speech-recognition.js";
 
 const contexts = [
   { name: "Transport", icon: "↗" },
@@ -56,22 +59,53 @@ export default function Home() {
   const listenerSide = getOtherSpeaker(activeSpeaker);
   const activeSpeakerLabel = SPEAKER_LABELS[activeSpeaker];
   const listenerLabel = SPEAKER_LABELS[listenerSide];
+  const addSpeechTranscript = useCallback((transcript) => {
+    setMessage((currentMessage) =>
+      mergeSpeechTranscript(currentMessage, transcript),
+    );
+  }, []);
+  const {
+    status: speechStatus,
+    message: speechMessage,
+    locale: speechLocale,
+    startListening,
+    cancelListening,
+    clearSpeechMessage,
+  } = useSpeechRecognition({
+    language: sourceLanguage,
+    onTranscript: addSpeechTranscript,
+  });
+  const isSpeechActive =
+    speechStatus === "listening" || speechStatus === "processing";
+
+  function changeParticipantLanguage(participant, language) {
+    cancelListening();
+
+    if (participant === "visitor") {
+      setVisitorLanguage(language);
+    } else {
+      setRwandanLanguage(language);
+    }
+  }
 
   function changeActiveSpeaker(speakerSide) {
     if (speakerSide === activeSpeaker) {
       return;
     }
 
+    cancelListening();
     setActiveSpeaker(speakerSide);
     setMessage("");
     setError("");
   }
 
   function startNewConversation() {
+    cancelListening();
     dispatchConversation({ type: "clear" });
     setActiveSpeaker("visitor");
     setMessage("");
     setError("");
+    clearSpeechMessage();
   }
 
   async function submitMessage(event) {
@@ -200,7 +234,9 @@ export default function Home() {
             <select
               id={visitorLanguageId}
               value={visitorLanguage}
-              onChange={(event) => setVisitorLanguage(event.target.value)}
+              onChange={(event) =>
+                changeParticipantLanguage("visitor", event.target.value)
+              }
               disabled={isLoading}
             >
               {languages.map((language) => (
@@ -214,7 +250,9 @@ export default function Home() {
             <select
               id={rwandanLanguageId}
               value={rwandanLanguage}
-              onChange={(event) => setRwandanLanguage(event.target.value)}
+              onChange={(event) =>
+                changeParticipantLanguage("rwandan", event.target.value)
+              }
               disabled={isLoading}
             >
               {languages.map((language) => (
@@ -354,7 +392,13 @@ export default function Home() {
               id={messageId}
               rows="2"
               value={message}
-              onChange={(event) => setMessage(event.target.value)}
+              onChange={(event) => {
+                setMessage(event.target.value);
+
+                if (speechStatus === "error") {
+                  clearSpeechMessage();
+                }
+              }}
               placeholder={`Type in ${sourceLanguage}…`}
               maxLength="2000"
               disabled={isLoading}
@@ -362,13 +406,51 @@ export default function Home() {
             <button
               className="microphone-button"
               type="button"
-              aria-label="Voice input coming in a later milestone"
-              title="Voice input coming soon"
-              disabled
+              data-state={speechStatus}
+              aria-label={
+                isSpeechActive
+                  ? `Cancel ${activeSpeakerLabel} voice input`
+                  : `Start ${activeSpeakerLabel} voice input in ${sourceLanguage}`
+              }
+              title={
+                speechStatus === "unavailable"
+                  ? "Voice input unavailable"
+                  : isSpeechActive
+                    ? "Cancel listening"
+                    : `Speak in ${sourceLanguage}`
+              }
+              onClick={isSpeechActive ? cancelListening : startListening}
+              disabled={isLoading || speechStatus === "unavailable"}
             >
               <MicrophoneIcon />
             </button>
           </div>
+          {speechStatus !== "idle" || speechMessage ? (
+            <div
+              className="speech-feedback"
+              data-state={speechStatus}
+              role={speechStatus === "error" ? "alert" : "status"}
+            >
+              <p>
+                {speechStatus === "listening" ? (
+                  <span className="listening-dot" aria-hidden="true" />
+                ) : null}
+                {speechStatus === "processing"
+                  ? "Processing transcript…"
+                  : speechMessage}
+              </p>
+              {isSpeechActive ? (
+                <button type="button" onClick={cancelListening}>
+                  Cancel listening
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {speechLocale ? (
+            <p className="speech-locale-note">
+              Configured voice locale for {activeSpeakerLabel}: {speechLocale}
+            </p>
+          ) : null}
           {error ? <p className="error-message" role="alert">{error}</p> : null}
           <div className="composer-footer">
             <p>
@@ -377,7 +459,12 @@ export default function Home() {
             <button
               className="send-button"
               type="submit"
-              disabled={!message.trim() || isLoading || sourceLanguage === targetLanguage}
+              disabled={
+                !message.trim() ||
+                isLoading ||
+                isSpeechActive ||
+                sourceLanguage === targetLanguage
+              }
             >
               {isLoading ? "Interpreting…" : `Interpret for ${listenerLabel}`}
               <span aria-hidden="true">→</span>

@@ -6,9 +6,9 @@ Kasuku
 
 ## Current milestone
 
-M5 — Two-way conversation and language switching
+M6 — Speech-to-text
 
-Status: implementation complete as of 2026-08-13. The 12-test suite, priority live English ↔ Kinyarwanda Transport flow, cleared-history check, and production build pass.
+Status: implementation complete as of 2026-08-13. All 22 automated tests and the production build pass. Real microphone accuracy remains device/browser dependent and could not be exercised in this non-interactive environment.
 
 ## Completed work
 
@@ -54,6 +54,14 @@ Status: implementation complete as of 2026-08-13. The 12-test suite, priority li
 - Added turn guidance, role-specific composer labels, listener-specific Send copy, and role-positioned message bubbles for a phone shared by two people.
 - Kept the M4 six-turn server-enforced history window unchanged across both directions.
 - Strengthened the interpreter prompt to identify the current speaker/listener, resolve cross-turn references, and render indirect requests as natural direct communication.
+- Completed M6 with the browser `SpeechRecognition` API and `webkitSpeechRecognition` fallback; no paid/cloud STT provider, TTS, continuous listening, automatic turn detection, native service, background listening, or wake word was added.
+- Enabled the microphone for the current Visitor or Rwandan and bound recognition to that participant's derived source language.
+- Added maintainable explicit locale mapping for English (`en-US`) and Kinyarwanda (`rw-RW`); French and Swahili voice input fail visibly as unconfigured instead of silently substituting a locale.
+- Added idle, listening, processing, error, and unavailable speech states, including a pulsing listening control, status feedback, configured-locale note, and visible `Cancel listening` action.
+- Added transcript insertion into the existing editable composer. Recognized speech is never submitted automatically, so the participant can review or correct it before using the normal interpretation flow.
+- Added lifecycle cleanup so switching participants, changing either participant language, clearing the conversation, starting another recognition attempt, or unmounting safely aborts the current short-lived recognition instance.
+- Kept the textarea usable during speech errors and unavailable states, with plain-language feedback for permission denial, missing microphone, no speech, network failure, unsupported locale, and unexpected failure.
+- Added no audio capture storage, audio files, audio uploads, or application-level recording retention.
 
 ## Files changed
 
@@ -69,12 +77,15 @@ Status: implementation complete as of 2026-08-13. The 12-test suite, priority li
 - `jsconfig.json` — JavaScript project path alias configuration.
 - `src/app/layout.js` — root App Router layout and Kasuku metadata, moved from `app/`.
 - `src/app/page.js` — explicit Visitor/Rwandan state, participant language selectors, derived direction, active-speaker control, role-aware composer, and shared history rendering.
-- `src/app/globals.css` — mobile-first speaker switch, visible turn state, role-distinguished bubbles, responsive composer, and participant language layout.
+- `src/app/globals.css` — mobile-first speaker switch plus microphone listening/processing/error feedback, cancel control, and active-listening animation.
 - `src/app/api/translate/route.js` — validates `visitor`/`rwandan` history and defaults omitted speaker identity to Visitor.
 - `src/app/api/translate/prompt.js` — names the active speaker/listener and strengthens cross-direction reference and indirect-request handling.
 - `src/lib/conversation.js` — explicit speaker identities/labels, direction derivation, other-speaker lookup, reducer, and unchanged six-turn selector.
+- `src/lib/speech-recognition.js` — locale mapping, standard/WebKit constructor selection, transcript extraction/merge, error normalization, and disposable single-utterance recognition sessions.
+- `src/hooks/use-speech-recognition.js` — client-only React lifecycle adapter for availability, start, cancel, transcript delivery, errors, language changes, and cleanup.
 - `test/interpretation-context.test.js` — M3–M5 prompt/route contracts, including mixed-direction Rwandan history forwarding.
 - `test/conversation-model.test.js` — M4/M5 chronology, six-turn window, clear/failure behavior, automatic reversal, switch-back, and history-preservation tests.
+- `test/speech-recognition.test.js` — M6 locale, transcript, non-submission, permission, unavailable, cancellation, speaker-switch, clear/reuse, and typing-fallback coverage with browser API mocks.
 - `.env.example` — documents the required `EJOCHAT_API_KEY` variable without a real secret.
 
 ## Architectural decisions
@@ -111,6 +122,12 @@ Status: implementation complete as of 2026-08-13. The 12-test suite, priority li
 - Keep speaker changes explicit through the shared-phone control; do not infer or automatically detect who is speaking.
 - Preserve context, participant languages, and all successful turns when switching speakers. Clear only the unsent draft/error during a switch so text cannot be submitted under the wrong speaker or language.
 - `New conversation` clears history and resets the active turn to Visitor without changing Transport or the selected participant languages.
+- Keep speech recognition browser-only and client-side. Kasuku creates one non-continuous recognition instance per user action and requests one final transcript; it does not manage or retain raw audio.
+- Map speech locales centrally by Kasuku language name. M6 maps only English to `en-US` and Kinyarwanda to `rw-RW`; an unmapped language disables voice with a typing fallback.
+- Prefer `window.SpeechRecognition`, falling back only to `window.webkitSpeechRecognition` when the standard constructor is absent.
+- Never auto-submit speech. Merge recognized text into the controlled textarea and preserve the existing manual Send action.
+- Treat participant/language changes as recognition-session boundaries. Cancel first, then update the active side or locale so an old-language transcript cannot enter the new speaker's draft.
+- Surface runtime rejection of `rw-RW` without substituting English or another locale; typed input and the rest of Kasuku remain available.
 
 ## Commands run
 
@@ -146,6 +163,10 @@ Status: implementation complete as of 2026-08-13. The 12-test suite, priority li
 - Ran the priority live Transport exchange through EjoChat in both directions with accumulated shared history, then sent the contextual follow-up after switching back to Visitor; all requests returned HTTP 200.
 - Ran the same follow-up with an empty history array after clear to verify the cleared request carried zero prior turns.
 - Reran `npm.cmd run build`; Next.js compiled successfully and retained `/` plus dynamic `/api/translate`.
+- Ran `npm.cmd test` after M6 implementation and cancellation hardening; all 22 tests passed.
+- Ran `npm.cmd run build`; the optimized Next.js 16.3.0 build passed with `/` and `/api/translate` intact.
+- Checked for the cataloged `agent-browser` CLI; it is not installed in this environment.
+- Attempted a non-recording headless Chrome capability probe for the Web Speech constructor and `rw-RW` configuration. Chrome returned no usable DOM result in both default and isolated-profile attempts, so the runtime capability result is recorded as inconclusive rather than supported.
 
 ## Tests performed
 
@@ -189,29 +210,43 @@ Status: implementation complete as of 2026-08-13. The 12-test suite, priority li
 - Language/speaker switching test: the derived direction reversed and restored while the history selector returned the same chronological turns.
 - M5 production build: passed with `/` statically generated and `/api/translate` registered as a dynamic server route.
 - M5 scope check: no speech recognition, TTS, Android/native behavior, listening, wake word, speaker detection, database, or M6 implementation was added.
+- M6 automated suite: 22/22 passed, including all prior conversation/interpretation tests and 10 speech-recognition cases.
+- English transcript test: a mocked `en-US` browser session recognized “I need to go to Nyabugogo but I need to stop at an ATM first.” and placed it in the editable draft; the submission count remained zero.
+- Kinyarwanda configuration test: the Rwandan session requested exactly `rw-RW` and delivered a mocked Kinyarwanda transcript to the draft callback without locale substitution.
+- Permission-denied test: normalized to a short microphone-denied message; no transcript was inserted and manual draft editing continued.
+- Recognition-unavailable test: standard constructor selection, WebKit fallback selection, and missing-constructor behavior passed.
+- Cancel test: abort was called, state returned to idle, and a late transcript was ignored.
+- Speaker-switch test: the active `en-US` session was aborted before a new `rw-RW` session started.
+- Clear-conversation microphone test: recognition was cancelled/disposed and a fresh session worked afterward.
+- Manual text fallback test: draft text remained editable and accepted more typing after a simulated speech error.
+- M6 production build: passed; `/` remains static and `/api/translate` remains dynamic.
+- M6 scope check: no TTS, continuous/background listening, auto-submit, automatic speaker/turn detection, Android/native functionality, wake word, database, or M7 implementation was added.
 
 ## Known issues
 
 - The PowerShell execution policy blocks `npm.ps1`; use `npm.cmd` for npm commands on this machine.
 - npm/Next.js commands were unusually slow in this OneDrive-hosted Windows workspace. A sandboxed build can fail with `spawn EPERM`; the same build succeeded with process-spawn permission.
 - AI naturalness requires human multilingual evaluation in later milestones; it cannot be guaranteed by documentation alone.
-- The microphone remains intentionally disabled; speech is out of scope until M6.
 - Live M3 evaluation currently covers only English-to-Kinyarwanda. French, Swahili, reverse directions, and broader human multilingual review remain unverified.
 - Ejo Labs' public pages did not expose the upstream request-body schema. The current endpoint accepted M3's OpenAI-style `system` and `user` messages and returned the documented `choices[0].message.content` shape in five live checks, but quotas and formal contract guarantees remain undocumented.
 - Browser visual/interaction verification was not completed because the cataloged `agent-browser` CLI is not installed in this environment; the layout compiled successfully and model/API behavior is covered by automated tests.
 - The M5 live priority flow covers Transport and English ↔ Kinyarwanda only. Other supported contexts and language pairs remain available but were not live-tested during M5.
 - The final Kinyarwanda follow-up naturally omits English reporting language and explicit pronouns; broader bilingual human review is still recommended for nuanced reference resolution.
+- Real English microphone capture and recognition accuracy were not testable because this environment lacks interactive browser automation and a controllable microphone input. The browser adapter and transcript-to-draft path are verified with mocks.
+- Real Kinyarwanda recognition support is unverified. Kasuku requests `rw-RW` exactly, but browser/OS/vendor support varies and the installed headless Chrome probe was inconclusive; rejection is shown as an error with typing preserved.
+- Browser speech recognition may require user permission, a working microphone, a secure/localhost origin, network connectivity, and browser/vendor recognition services.
+- French and Swahili remain available for typed interpretation but deliberately have no M6 speech locale mapping; voice input shows unavailable for those selections.
+- `SpeechRecognition` does not expose a reliable locale-support enumeration API, so accepting `recognition.lang = "rw-RW"` would not by itself prove that the runtime can recognize Kinyarwanda.
 
 ## Unresolved questions
 
 1. Confirm EjoChat quotas, timeout guidance, formal request-contract guarantees, and all supported language pairs; the endpoint, authentication, message roles, and response content path work in the tested English-to-Kinyarwanda flow.
 2. What are the C4IR/KiNLP TTS endpoint, authentication method, payload limits, audio format, quotas, latency expectations, and usage terms?
-3. Which speech-to-text implementation will be used, and which browsers/languages must it support?
-4. Is Kinyarwanda TTS user-triggered or automatic, and is it required whenever the target language is Kinyarwanda or merely offered?
-5. What privacy notice/consent and content-retention statements are required when text or audio is sent to external providers?
-6. What target browsers, devices, mobile viewport sizes, and accessibility conformance level define acceptance?
-7. What input/history size limits, rate limits, and retry/timeout policies should the deployed MVP enforce beyond the M4 six-turn window?
+3. Is Kinyarwanda TTS user-triggered or automatic, and is it required whenever the target language is Kinyarwanda or merely offered?
+4. What privacy notice/consent and content-retention statements are required when text or audio is sent to external providers?
+5. What target browsers, devices, mobile viewport sizes, and accessibility conformance level define acceptance?
+6. What input/history size limits, rate limits, and retry/timeout policies should the deployed MVP enforce beyond the M4 six-turn window?
 
 ## Exact next step
 
-M6 Speech-to-text
+M7 Kinyarwanda TTS
