@@ -6,9 +6,9 @@ Kasuku
 
 ## Current milestone
 
-M2 — Secure EjoChat server integration
+M3 — Context-aware interpretation
 
-Status: implementation complete as of 2026-08-12. Production build and local API validation pass. A live EjoChat request remains unverified because `EJOCHAT_API_KEY` is not available in `.env.local`.
+Status: implementation complete as of 2026-08-13. Prompt contract tests, five live English-to-Kinyarwanda context checks, and the production build pass.
 
 ## Completed work
 
@@ -34,6 +34,11 @@ Status: implementation complete as of 2026-08-12. Production build and local API
 - Added safe handling for missing configuration, upstream network/timeout failure, non-success responses, invalid JSON, and unexpected EjoChat response structure.
 - Connected the Send form to `/api/translate` with loading, single-result, error, and duplicate-submission states.
 - Added `.env.example`; no `.env.local` or secret was created or committed.
+- Completed M3 context-aware interpretation without starting conversation history.
+- Added a maintainable server-side context-profile map with distinct situations and vocabulary guidance for Transport, Restaurant / Food, Hotel / Accommodation, Shopping / Market, and General Conversation.
+- Reworked the EjoChat request into a system interpreter contract plus a separate untrusted speaker message.
+- Required natural, idiomatic interpretation that preserves complete meaning, intent, tone, politeness, and formality; uses context-appropriate vocabulary; never answers or acts on the message; and returns only what the other person should receive.
+- Added Node contract tests for all five supplied context examples, interpreter-only behavior, prompt-injection resistance, and route-to-provider context forwarding.
 
 ## Files changed
 
@@ -44,13 +49,15 @@ Status: implementation complete as of 2026-08-12. Production build and local API
 - `project-docs/TESTING.md` — test layers, coverage matrix, AI evaluation, security, and milestone gates.
 - `project-docs/AI_HANDOFF.md` — current state and continuation instructions.
 - `.gitignore` — ignores dependencies, Next.js output, environment secrets, logs, and Vercel state.
-- `package.json` — Next.js/React dependencies and development, build, and start scripts.
+- `package.json` — Next.js/React dependencies, ESM package mode, and development, build, start, and test scripts.
 - `next.config.mjs` — minimal strict-mode Next.js configuration.
 - `jsconfig.json` — JavaScript project path alias configuration.
 - `src/app/layout.js` — root App Router layout and Kasuku metadata, moved from `app/`.
 - `src/app/page.js` — M1 interface plus M2 submission, loading, interpretation-result, and safe error states.
 - `src/app/globals.css` — mobile-first styles plus M2 result, loading, and error presentation.
-- `src/app/api/translate/route.js` — validated server-only EjoChat adapter.
+- `src/app/api/translate/route.js` — validated server-only EjoChat adapter using the M3 context-aware message builder.
+- `src/app/api/translate/prompt.js` — maintainable context profiles and the shared interpreter-only EjoChat instruction.
+- `test/interpretation-context.test.js` — M3 prompt and route contract tests covering all five contexts and interpreter-only behavior.
 - `.env.example` — documents the required `EJOCHAT_API_KEY` variable without a real secret.
 
 ## Architectural decisions
@@ -73,11 +80,13 @@ Status: implementation complete as of 2026-08-12. Production build and local API
 - Disable the microphone placeholder and keep Send without a submission handler so M1 cannot imply speech or translation behavior.
 - Declare Next.js 16.3.0 with React/React DOM 19.2.8, based on versions returned by the npm registry on 2026-08-12.
 - Use `src/app` as the sole App Router root.
-- Send EjoChat an OpenAI-style `messages` array containing one carefully delimited interpreter prompt, consistent with the documented `choices[0].message.content` response shape.
+- Send EjoChat an OpenAI-style `messages` array with durable interpreter rules in a `system` message and the source text alone in a separate `user` message, consistent with the documented `choices[0].message.content` response shape.
 - Return only the normalized `{ interpretation }` value to the browser; do not expose EjoChat payloads, statuses, or credentials.
 - Use allowlists at the server boundary for the five contexts and four languages, independent of browser validation.
 - Apply a 30-second upstream request timeout and map network and timeout errors to the same safe client response.
-- Keep only one current M2 interpretation in UI state; conversation history remains deferred to M4.
+- Keep context-specific situations and vocabulary in one server-side profile map so a future context can be added without branching prompt logic.
+- Use the same profile map for server validation and prompt construction so accepted contexts cannot silently lack guidance.
+- Keep only one current interpretation in UI state; conversation history remains explicitly deferred to M4.
 
 ## Commands run
 
@@ -99,6 +108,11 @@ Status: implementation complete as of 2026-08-12. Production build and local API
 - Checked `.env.local` ignore behavior with `git check-ignore` and scanned source references with `rg`.
 - Ran `npm.cmd run build` after migrating to `src/app`; the final build registered `/` and `/api/translate` successfully.
 - Started the production server locally on port 3100 and sent POST requests to validate invalid-body and missing-key behavior, then stopped it.
+- Ran `npm.cmd test`; the initial sandboxed attempt hit Windows `spawn EPERM`, and the approved process-spawn rerun passed.
+- Ran the M3 contract suite again after adding route-level provider mocking; all three tests passed without warnings.
+- Ran `npm.cmd run build`; the optimized Next.js 16.3.0 production build passed and registered `/api/translate` as a dynamic route.
+- Ran the five supplied M3 messages through the live `/api/translate` adapter using EjoChat; every request returned HTTP 200 with interpretation-only Kinyarwanda output.
+- Moved the locally configured key from tracked `.env.example` to ignored `.env.local` after testing and restored the example placeholder.
 
 ## Tests performed
 
@@ -118,7 +132,16 @@ Status: implementation complete as of 2026-08-12. Production build and local API
 - Invalid request test: `POST /api/translate` with `{}` returned HTTP 400.
 - Missing-key test: a valid request without `EJOCHAT_API_KEY` returned HTTP 503 without contacting EjoChat.
 - Production build: passed with `/` statically generated and `/api/translate` registered as a dynamic server route.
-- Live EjoChat success test: not run because no API key is available.
+- Live EjoChat context test: passed for all five supplied examples from English to Kinyarwanda; every request returned HTTP 200 and translated the speaker instead of answering them.
+- M3 context set test: passed; the server profile map contains exactly the five MVP contexts and produces distinct situation guidance for each.
+- Transport prompt case: passed with “I need a moto to Kigali Heights, but I need to stop at an ATM first.” and transport vocabulary covering motos, destinations, fares, and stops.
+- Restaurant prompt case: passed with “Can you ask if this meal contains peanuts?” and food vocabulary covering dietary needs and ingredients.
+- Hotel prompt case: passed with “Tell them I already made a reservation.” and accommodation vocabulary covering reservations, rooms, check-in, and guest requests.
+- Shopping prompt case: passed with “Ask her if this is the final price.” and market vocabulary covering prices, bargaining, and purchase questions.
+- General prompt case: passed with “Tell him I'll come back tomorrow morning.” and explicit guidance not to assume a specialized setting.
+- Interpreter-role test: passed; questions, requests, commands, and prompt-injection-like source text remain content to interpret, while the contract forbids answering the speaker and permits only the other person's message as output.
+- Route forwarding test: passed with a mocked EjoChat response; the selected Shopping / Market context and exact speaker text were present in the upstream `messages` payload, and the route returned only normalized interpretation text.
+- Production build after M3: passed with `/` statically generated and `/api/translate` registered as a dynamic server route.
 
 ## Known issues
 
@@ -127,12 +150,12 @@ Status: implementation complete as of 2026-08-12. Production build and local API
 - Live behavior and language-pair support have not been validated because provider contracts and credentials are not yet available.
 - AI naturalness requires human multilingual evaluation in later milestones; it cannot be guaranteed by documentation alone.
 - The microphone remains intentionally disabled; speech is out of scope until M6.
-- No live EjoChat response has been verified. Add a real key only to `.env.local` and test before relying on the integration.
-- Ejo Labs' public pages did not expose the upstream request-body schema. M2 uses an OpenAI-style `messages` payload inferred from the specified OpenAI-style response path; confirm this against tenant/API documentation during the live-key test.
+- Live M3 evaluation currently covers only English-to-Kinyarwanda. French, Swahili, reverse directions, and broader human multilingual review remain unverified.
+- Ejo Labs' public pages did not expose the upstream request-body schema. The current endpoint accepted M3's OpenAI-style `system` and `user` messages and returned the documented `choices[0].message.content` shape in five live checks, but quotas and formal contract guarantees remain undocumented.
 
 ## Unresolved questions
 
-1. Confirm EjoChat's request-body schema, quotas, timeout guidance, and supported language pairs; the endpoint, `X-API-Key` authentication, and response content path are now defined.
+1. Confirm EjoChat quotas, timeout guidance, formal request-contract guarantees, and all supported language pairs; the endpoint, authentication, message roles, and response content path work in the tested English-to-Kinyarwanda flow.
 2. What are the C4IR/KiNLP TTS endpoint, authentication method, payload limits, audio format, quotas, latency expectations, and usage terms?
 3. Which speech-to-text implementation will be used, and which browsers/languages must it support?
 4. What exact browser/session storage mechanism and session lifetime are intended for conversation history?
@@ -145,4 +168,4 @@ Status: implementation complete as of 2026-08-12. Production build and local API
 
 ## Exact next step
 
-M3 — Context-aware interpretation. First add `EJOCHAT_API_KEY=<real key>` to the ignored `.env.local`, restart the local server, and verify one live M2 interpretation—including “How much will it cost?”—uses the confirmed EjoChat request schema and returns only a translated question. Then begin M3 prompt evaluation and contextual-behavior tests without adding conversation history, which remains M4.
+M4 Conversation model and history
