@@ -1,9 +1,14 @@
 export const RECENT_HISTORY_LIMIT = 6;
 
 export const SPEAKER_SIDES = Object.freeze([
-  "participant-one",
-  "participant-two",
+  "visitor",
+  "rwandan",
 ]);
+
+export const SPEAKER_LABELS = Object.freeze({
+  visitor: "Visitor",
+  rwandan: "Rwandan",
+});
 
 export function conversationReducer(turns, action) {
   switch (action.type) {
@@ -26,21 +31,24 @@ export function selectRecentHistory(turns) {
   }));
 }
 
-export function inferSpeakerSide(turns, sourceLanguage, targetLanguage) {
-  const firstTurn = turns[0];
-
-  if (!firstTurn) {
-    return "participant-one";
+export function getLanguageDirection(
+  activeSpeaker,
+  visitorLanguage,
+  rwandanLanguage,
+) {
+  if (activeSpeaker === "rwandan") {
+    return {
+      sourceLanguage: rwandanLanguage,
+      targetLanguage: visitorLanguage,
+    };
   }
 
-  if (
-    sourceLanguage === firstTurn.targetLanguage &&
-    targetLanguage === firstTurn.sourceLanguage
-  ) {
-    return firstTurn.speakerSide === "participant-one"
-      ? "participant-two"
-      : "participant-one";
-  }
+  return {
+    sourceLanguage: visitorLanguage,
+    targetLanguage: rwandanLanguage,
+  };
+}
 
-  return firstTurn.speakerSide;
+export function getOtherSpeaker(activeSpeaker) {
+  return activeSpeaker === "rwandan" ? "visitor" : "rwandan";
 }

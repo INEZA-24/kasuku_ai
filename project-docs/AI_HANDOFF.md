@@ -6,9 +6,9 @@ Kasuku
 
 ## Current milestone
 
-M4 — Conversation model and history
+M5 — Two-way conversation and language switching
 
-Status: implementation complete as of 2026-08-13. Conversation-model and prompt contract tests, the required live three-turn Transport check, cleared-history verification, and the production build pass.
+Status: implementation complete as of 2026-08-13. The 12-test suite, priority live English ↔ Kinyarwanda Transport flow, cleared-history check, and production build pass.
 
 ## Completed work
 
@@ -46,6 +46,14 @@ Status: implementation complete as of 2026-08-13. Conversation-model and prompt 
 - Added a shared six-turn recent-history selector; the browser retains all successful turns for the loaded page but sends only the six newest turns to `/api/translate`.
 - Added strict server validation for history shape, speaker side, text sizes, language direction, and the six-turn limit.
 - Updated the EjoChat prompt to delimit previous conversation from the current message and use history only for reference resolution while retaining interpreter-only behavior.
+- Completed M5 without starting speech recognition, TTS, native functionality, automatic speaker detection, background listening, wake-word behavior, persistence, or database work.
+- Replaced generic participant sides with explicit `visitor` and `rwandan` identities throughout client state, history payloads, server validation, prompts, tests, and UI labels.
+- Assigned one language to each participant and made source/target direction derived from the active speaker: Visitor defaults to English → Kinyarwanda, while Rwandan automatically becomes Kinyarwanda → English.
+- Added an explicit two-button active-speaker control showing each side's direction and visible `Current turn`/`Tap to switch` status text.
+- Preserved the same context and successful chronological history when speakers or participant languages change; the default and priority context remains Transport.
+- Added turn guidance, role-specific composer labels, listener-specific Send copy, and role-positioned message bubbles for a phone shared by two people.
+- Kept the M4 six-turn server-enforced history window unchanged across both directions.
+- Strengthened the interpreter prompt to identify the current speaker/listener, resolve cross-turn references, and render indirect requests as natural direct communication.
 
 ## Files changed
 
@@ -60,13 +68,13 @@ Status: implementation complete as of 2026-08-13. Conversation-model and prompt 
 - `next.config.mjs` — minimal strict-mode Next.js configuration.
 - `jsconfig.json` — JavaScript project path alias configuration.
 - `src/app/layout.js` — root App Router layout and Kasuku metadata, moved from `app/`.
-- `src/app/page.js` — in-memory conversation state, chronological turn rendering, bounded history submission, participant labels, and new-conversation reset.
-- `src/app/globals.css` — participant-distinguished conversation bubbles, chronological history layout, pending-turn state, and clear-action styling.
-- `src/app/api/translate/route.js` — validated server-only EjoChat adapter with bounded history and speaker-side validation.
-- `src/app/api/translate/prompt.js` — maintainable context profiles plus clearly delimited previous-conversation and current-message prompt sections.
-- `src/lib/conversation.js` — shared turn reducer, participant-side inference, and six-turn history-window selector.
-- `test/interpretation-context.test.js` — M3/M4 prompt and route contract tests, including history separation, forwarding, and oversized-history rejection.
-- `test/conversation-model.test.js` — turn chronology, required fields, history window, failure preservation, clear behavior, and participant-side tests.
+- `src/app/page.js` — explicit Visitor/Rwandan state, participant language selectors, derived direction, active-speaker control, role-aware composer, and shared history rendering.
+- `src/app/globals.css` — mobile-first speaker switch, visible turn state, role-distinguished bubbles, responsive composer, and participant language layout.
+- `src/app/api/translate/route.js` — validates `visitor`/`rwandan` history and defaults omitted speaker identity to Visitor.
+- `src/app/api/translate/prompt.js` — names the active speaker/listener and strengthens cross-direction reference and indirect-request handling.
+- `src/lib/conversation.js` — explicit speaker identities/labels, direction derivation, other-speaker lookup, reducer, and unchanged six-turn selector.
+- `test/interpretation-context.test.js` — M3–M5 prompt/route contracts, including mixed-direction Rwandan history forwarding.
+- `test/conversation-model.test.js` — M4/M5 chronology, six-turn window, clear/failure behavior, automatic reversal, switch-back, and history-preservation tests.
 - `.env.example` — documents the required `EJOCHAT_API_KEY` variable without a real secret.
 
 ## Architectural decisions
@@ -98,7 +106,11 @@ Status: implementation complete as of 2026-08-13. Conversation-model and prompt 
 - Keep successful conversation turns only in React memory for the loaded page; refresh or `New conversation` ends the current ephemeral session, and no browser persistence or database is used.
 - Retain every successful turn in the visible page history but send only the six newest turns to EjoChat; the server independently rejects larger history payloads.
 - Append a turn only after a successful interpretation so an upstream or validation failure cannot erase or corrupt prior successful turns.
-- Treat the first language direction as participant one; if the existing manual control is reversed, label the source as participant two without automatically switching languages or advancing M5 behavior.
+- Treat participant identity and participant language assignments as authoritative; never store an independently mutable source/target direction that could drift from the active speaker.
+- Derive Visitor direction as Visitor language → Rwandan language and Rwandan direction as the exact reverse; switching back reproduces the original direction.
+- Keep speaker changes explicit through the shared-phone control; do not infer or automatically detect who is speaking.
+- Preserve context, participant languages, and all successful turns when switching speakers. Clear only the unsent draft/error during a switch so text cannot be submitted under the wrong speaker or language.
+- `New conversation` clears history and resets the active turn to Visitor without changing Transport or the selected participant languages.
 
 ## Commands run
 
@@ -130,6 +142,10 @@ Status: implementation complete as of 2026-08-13. Conversation-model and prompt 
 - Sent “Ask him how much it will cost.” once more with an empty history array to verify the cleared-conversation request contains no prior context.
 - Ran `npm.cmd run build`; Next.js 16.3.0 compiled and generated all routes successfully.
 - Attempted browser-level verification using the prescribed browser-automation skill; its `agent-browser` CLI was unavailable in this environment, so no screenshot or browser interaction run was completed.
+- Ran the M5 automated suite after replacing generic participant sides and adding derived directions; all 12 tests passed.
+- Ran the priority live Transport exchange through EjoChat in both directions with accumulated shared history, then sent the contextual follow-up after switching back to Visitor; all requests returned HTTP 200.
+- Ran the same follow-up with an empty history array after clear to verify the cleared request carried zero prior turns.
+- Reran `npm.cmd run build`; Next.js compiled successfully and retained `/` plus dynamic `/api/translate`.
 
 ## Tests performed
 
@@ -165,7 +181,14 @@ Status: implementation complete as of 2026-08-13. Conversation-model and prompt 
 - Live Transport turn 3 with turns 1–2 supplied as history: “Tell him I need to stop at an ATM first.” → “Nkeneye guhagarara kuri ATM mbere.”
 - Cleared-history check: the turn-2 message sent with zero prior turns returned the generic “Ni angahe?”, confirming the request did not retain the prior moto/trip context.
 - Production build after M4: passed with `/` statically generated and `/api/translate` registered as a dynamic server route.
-- Scope check: no database, local/session storage, cloud persistence, automatic language switching, speech, or TTS implementation was added.
+- M5 automated suite: 12/12 passed, including Visitor English → Kinyarwanda, Rwandan Kinyarwanda → English, switching back, unchanged shared history, mixed-direction route forwarding, clear behavior, and the six-turn limit.
+- Live Visitor turn: “I need a moto to Nyabugogo, but I need to stop at an ATM first.” → “Ndashaka moto ijya i Nyabugogo, ariko nkeneye kubanza guhagarara kuri ATM.”
+- Live Rwandan turn after switching: “Ni byiza, ariko guhagarara kuri ATM bishobora kongera igiciro.” → “Alright, but stopping at the ATM might increase the fare.”
+- Live Visitor contextual follow-up after switching back with two prior turns: “Ask him how much that will cost.” → “Bizatwara angahe?”, a natural direct question to the driver rather than an answer or assistant response.
+- Clear test: the follow-up request sent after clear contained zero history turns.
+- Language/speaker switching test: the derived direction reversed and restored while the history selector returned the same chronological turns.
+- M5 production build: passed with `/` statically generated and `/api/translate` registered as a dynamic server route.
+- M5 scope check: no speech recognition, TTS, Android/native behavior, listening, wake word, speaker detection, database, or M6 implementation was added.
 
 ## Known issues
 
@@ -175,8 +198,9 @@ Status: implementation complete as of 2026-08-13. Conversation-model and prompt 
 - The microphone remains intentionally disabled; speech is out of scope until M6.
 - Live M3 evaluation currently covers only English-to-Kinyarwanda. French, Swahili, reverse directions, and broader human multilingual review remain unverified.
 - Ejo Labs' public pages did not expose the upstream request-body schema. The current endpoint accepted M3's OpenAI-style `system` and `user` messages and returned the documented `choices[0].message.content` shape in five live checks, but quotas and formal contract guarantees remain undocumented.
-- The required M4 live history flow was verified only from English to Kinyarwanda; other language pairs and reverse-direction history remain for later multilingual and M5 testing.
 - Browser visual/interaction verification was not completed because the cataloged `agent-browser` CLI is not installed in this environment; the layout compiled successfully and model/API behavior is covered by automated tests.
+- The M5 live priority flow covers Transport and English ↔ Kinyarwanda only. Other supported contexts and language pairs remain available but were not live-tested during M5.
+- The final Kinyarwanda follow-up naturally omits English reporting language and explicit pronouns; broader bilingual human review is still recommended for nuanced reference resolution.
 
 ## Unresolved questions
 
@@ -190,4 +214,4 @@ Status: implementation complete as of 2026-08-13. Conversation-model and prompt 
 
 ## Exact next step
 
-M5 Two-way conversation and language switching
+M6 Speech-to-text

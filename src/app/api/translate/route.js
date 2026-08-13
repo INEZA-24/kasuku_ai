@@ -157,7 +157,7 @@ export async function POST(request) {
         messages: createInterpretationMessages({
           ...body,
           history: body.history ?? [],
-          speakerSide: body.speakerSide ?? "participant-one",
+          speakerSide: body.speakerSide ?? "visitor",
         }),
       }),
       cache: "no-store",

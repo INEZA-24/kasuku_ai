@@ -4,8 +4,10 @@ import { useId, useReducer, useState } from "react";
 
 import {
   conversationReducer,
-  inferSpeakerSide,
+  getLanguageDirection,
+  getOtherSpeaker,
   selectRecentHistory,
+  SPEAKER_LABELS,
 } from "../lib/conversation.js";
 
 const contexts = [
@@ -17,6 +19,7 @@ const contexts = [
 ];
 
 const languages = ["English", "Kinyarwanda", "French", "Swahili"];
+const speakerSides = ["visitor", "rwandan"];
 
 function MicrophoneIcon() {
   return (
@@ -34,24 +37,39 @@ function MicrophoneIcon() {
 }
 
 export default function Home() {
-  const sourceId = useId();
-  const targetId = useId();
+  const visitorLanguageId = useId();
+  const rwandanLanguageId = useId();
   const messageId = useId();
   const [context, setContext] = useState("Transport");
-  const [sourceLanguage, setSourceLanguage] = useState("English");
-  const [targetLanguage, setTargetLanguage] = useState("Kinyarwanda");
+  const [visitorLanguage, setVisitorLanguage] = useState("English");
+  const [rwandanLanguage, setRwandanLanguage] = useState("Kinyarwanda");
+  const [activeSpeaker, setActiveSpeaker] = useState("visitor");
   const [message, setMessage] = useState("");
   const [turns, dispatchConversation] = useReducer(conversationReducer, []);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const { sourceLanguage, targetLanguage } = getLanguageDirection(
+    activeSpeaker,
+    visitorLanguage,
+    rwandanLanguage,
+  );
+  const listenerSide = getOtherSpeaker(activeSpeaker);
+  const activeSpeakerLabel = SPEAKER_LABELS[activeSpeaker];
+  const listenerLabel = SPEAKER_LABELS[listenerSide];
 
-  function swapLanguages() {
-    setSourceLanguage(targetLanguage);
-    setTargetLanguage(sourceLanguage);
+  function changeActiveSpeaker(speakerSide) {
+    if (speakerSide === activeSpeaker) {
+      return;
+    }
+
+    setActiveSpeaker(speakerSide);
+    setMessage("");
+    setError("");
   }
 
   function startNewConversation() {
     dispatchConversation({ type: "clear" });
+    setActiveSpeaker("visitor");
     setMessage("");
     setError("");
   }
@@ -74,12 +92,6 @@ export default function Home() {
     setIsLoading(true);
     setError("");
 
-    const speakerSide = inferSpeakerSide(
-      turns,
-      sourceLanguage,
-      targetLanguage,
-    );
-
     try {
       const response = await fetch("/api/translate", {
         method: "POST",
@@ -89,7 +101,7 @@ export default function Home() {
           sourceLanguage,
           targetLanguage,
           context,
-          speakerSide,
+          speakerSide: activeSpeaker,
           history: selectRecentHistory(turns),
         }),
       });
@@ -108,7 +120,7 @@ export default function Home() {
         type: "add",
         turn: {
           id: globalThis.crypto.randomUUID(),
-          speakerSide,
+          speakerSide: activeSpeaker,
           originalText: trimmedMessage,
           interpretedText: data.interpretation.trim(),
           sourceLanguage,
@@ -162,6 +174,7 @@ export default function Home() {
                 type="button"
                 aria-pressed={isActive}
                 onClick={() => setContext(item.name)}
+                disabled={isLoading}
               >
                 <span className="context-icon" aria-hidden="true">{item.icon}</span>
                 <span>{item.name}</span>
@@ -177,17 +190,18 @@ export default function Home() {
           <p className="eyebrow">02</p>
           <div>
             <h2 id="language-heading">Set the languages</h2>
-            <p>Choose who is speaking and who is listening.</p>
+            <p>Choose the language each person uses.</p>
           </div>
         </div>
 
-        <div className="language-controls">
+        <div className="language-controls participant-languages">
           <div className="select-field">
-            <label htmlFor={sourceId}>Source language</label>
+            <label htmlFor={visitorLanguageId}>Visitor language</label>
             <select
-              id={sourceId}
-              value={sourceLanguage}
-              onChange={(event) => setSourceLanguage(event.target.value)}
+              id={visitorLanguageId}
+              value={visitorLanguage}
+              onChange={(event) => setVisitorLanguage(event.target.value)}
+              disabled={isLoading}
             >
               {languages.map((language) => (
                 <option key={language}>{language}</option>
@@ -195,21 +209,13 @@ export default function Home() {
             </select>
           </div>
 
-          <button
-            className="swap-button"
-            type="button"
-            aria-label={`Switch languages: ${sourceLanguage} to target and ${targetLanguage} to source`}
-            onClick={swapLanguages}
-          >
-            <span aria-hidden="true">⇄</span>
-          </button>
-
           <div className="select-field">
-            <label htmlFor={targetId}>Target language</label>
+            <label htmlFor={rwandanLanguageId}>Rwandan language</label>
             <select
-              id={targetId}
-              value={targetLanguage}
-              onChange={(event) => setTargetLanguage(event.target.value)}
+              id={rwandanLanguageId}
+              value={rwandanLanguage}
+              onChange={(event) => setRwandanLanguage(event.target.value)}
+              disabled={isLoading}
             >
               {languages.map((language) => (
                 <option key={language}>{language}</option>
@@ -242,13 +248,52 @@ export default function Home() {
           </div>
         </div>
 
+        <div className="speaker-panel">
+          <div className="speaker-panel-copy">
+            <p className="speaker-panel-label">Whose turn is it?</p>
+            <p>
+              <strong>{activeSpeakerLabel}</strong>, use {sourceLanguage}. Kasuku
+              will interpret into {targetLanguage} for the {listenerLabel}.
+            </p>
+          </div>
+          <div className="speaker-switch" role="group" aria-label="Active speaker">
+            {speakerSides.map((speakerSide) => {
+              const direction = getLanguageDirection(
+                speakerSide,
+                visitorLanguage,
+                rwandanLanguage,
+              );
+              const isActive = activeSpeaker === speakerSide;
+
+              return (
+                <button
+                  type="button"
+                  key={speakerSide}
+                  data-active={isActive}
+                  aria-pressed={isActive}
+                  onClick={() => changeActiveSpeaker(speakerSide)}
+                  disabled={isLoading}
+                >
+                  <span className="speaker-name">{SPEAKER_LABELS[speakerSide]}</span>
+                  <span className="speaker-direction">
+                    {direction.sourceLanguage} → {direction.targetLanguage}
+                  </span>
+                  <span className="speaker-status">
+                    {isActive ? "Current turn" : "Tap to switch"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <div className="conversation-canvas" aria-live="polite" aria-busy={isLoading}>
           {turns.length ? (
             <ol className="conversation-history" aria-label="Conversation history">
               {turns.map((turn) => {
-                const speakerNumber =
-                  turn.speakerSide === "participant-one" ? "1" : "2";
-                const listenerNumber = speakerNumber === "1" ? "2" : "1";
+                const turnSpeakerLabel = SPEAKER_LABELS[turn.speakerSide];
+                const turnListenerLabel =
+                  SPEAKER_LABELS[getOtherSpeaker(turn.speakerSide)];
 
                 return (
                   <li
@@ -259,13 +304,13 @@ export default function Home() {
                     <article>
                       <div className="message-bubble original-message">
                         <p className="message-label">
-                          Participant {speakerNumber} · {turn.sourceLanguage}
+                          {turnSpeakerLabel} · {turn.sourceLanguage}
                         </p>
                         <p className="message-text">{turn.originalText}</p>
                       </div>
                       <div className="message-bubble interpreted-message">
                         <p className="message-label">
-                          For participant {listenerNumber} · {turn.targetLanguage}
+                          For {turnListenerLabel} · {turn.targetLanguage}
                         </p>
                         <p className="message-text interpreted-text">
                           {turn.interpretedText}
@@ -292,13 +337,18 @@ export default function Home() {
             <div className="empty-state">
               <span className="empty-symbol" aria-hidden="true">“</span>
               <h3>Your conversation starts here</h3>
-              <p>Type a message below. Kasuku will help both people understand each other.</p>
+              <p>
+                Start with the {activeSpeakerLabel} in {sourceLanguage}. Kasuku
+                will keep both sides in one shared conversation.
+              </p>
             </div>
           )}
         </div>
 
         <form className="composer" onSubmit={submitMessage}>
-          <label htmlFor={messageId}>Message in {sourceLanguage}</label>
+          <label htmlFor={messageId}>
+            {activeSpeakerLabel}&apos;s message in {sourceLanguage}
+          </label>
           <div className="input-row">
             <textarea
               id={messageId}
@@ -321,13 +371,15 @@ export default function Home() {
           </div>
           {error ? <p className="error-message" role="alert">{error}</p> : null}
           <div className="composer-footer">
-            <p>Kasuku interprets your words for the other person.</p>
+            <p>
+              {sourceLanguage} → {targetLanguage} for the {listenerLabel}
+            </p>
             <button
               className="send-button"
               type="submit"
               disabled={!message.trim() || isLoading || sourceLanguage === targetLanguage}
             >
-              {isLoading ? "Interpreting…" : "Send"}
+              {isLoading ? "Interpreting…" : `Interpret for ${listenerLabel}`}
               <span aria-hidden="true">→</span>
             </button>
           </div>

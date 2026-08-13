@@ -3,7 +3,8 @@ import test from "node:test";
 
 import {
   conversationReducer,
-  inferSpeakerSide,
+  getLanguageDirection,
+  getOtherSpeaker,
   RECENT_HISTORY_LIMIT,
   selectRecentHistory,
 } from "../src/lib/conversation.js";
@@ -11,7 +12,7 @@ import {
 function makeTurn(index) {
   return {
     id: `turn-${index}`,
-    speakerSide: "participant-one",
+    speakerSide: "visitor",
     originalText: `Original ${index}`,
     interpretedText: `Interpretation ${index}`,
     sourceLanguage: "English",
@@ -65,15 +66,48 @@ test("a failed request action leaves successful history untouched", () => {
   assert.strictEqual(turnsAfterFailure, populatedTurns);
 });
 
-test("reversed selected languages identify the other participant side", () => {
+test("changing the active speaker automatically reverses the language direction", () => {
   const turns = [makeTurn(1)];
+  const visitorDirection = getLanguageDirection(
+    "visitor",
+    "English",
+    "Kinyarwanda",
+  );
+  const rwandanDirection = getLanguageDirection(
+    "rwandan",
+    "English",
+    "Kinyarwanda",
+  );
 
-  assert.equal(
-    inferSpeakerSide(turns, "English", "Kinyarwanda"),
-    "participant-one",
-  );
-  assert.equal(
-    inferSpeakerSide(turns, "Kinyarwanda", "English"),
-    "participant-two",
-  );
+  assert.deepEqual(visitorDirection, {
+    sourceLanguage: "English",
+    targetLanguage: "Kinyarwanda",
+  });
+  assert.deepEqual(rwandanDirection, {
+    sourceLanguage: "Kinyarwanda",
+    targetLanguage: "English",
+  });
+  assert.equal(getOtherSpeaker("visitor"), "rwandan");
+  assert.equal(getOtherSpeaker("rwandan"), "visitor");
+  assert.deepEqual(selectRecentHistory(turns), selectRecentHistory(turns));
+});
+
+test("switching speakers and languages does not mutate shared history", () => {
+  const turns = [
+    makeTurn(1),
+    {
+      ...makeTurn(2),
+      speakerSide: "rwandan",
+      originalText: "Ni byiza.",
+      interpretedText: "That is fine.",
+      sourceLanguage: "Kinyarwanda",
+      targetLanguage: "English",
+    },
+  ];
+  const beforeSwitch = selectRecentHistory(turns);
+
+  getLanguageDirection("rwandan", "English", "Kinyarwanda");
+  getLanguageDirection("visitor", "English", "Kinyarwanda");
+
+  assert.deepEqual(selectRecentHistory(turns), beforeSwitch);
 });
