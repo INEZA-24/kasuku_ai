@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useId, useReducer, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 
 import { useSpeechRecognition } from "../hooks/use-speech-recognition.js";
 
@@ -11,7 +18,12 @@ import {
   selectRecentHistory,
   SPEAKER_LABELS,
 } from "../lib/conversation.js";
-import { mergeSpeechTranscript } from "../lib/speech-recognition.js";
+import {
+  getVisitorSpeechRecognitionLanguage,
+  mergeSpeechTranscript,
+  shouldShowVisitorSpeechChoice,
+  VISITOR_SPEECH_RECOGNITION_OPTIONS,
+} from "../lib/speech-recognition.js";
 
 const contexts = [
   { name: "Transport", icon: "↗" },
@@ -43,6 +55,9 @@ export default function Home() {
   const visitorLanguageId = useId();
   const rwandanLanguageId = useId();
   const messageId = useId();
+  const speechChoiceTitleId = useId();
+  const firstSpeechChoiceRef = useRef(null);
+  const speechDraftBaseRef = useRef("");
   const [context, setContext] = useState("Transport");
   const [visitorLanguage, setVisitorLanguage] = useState("English");
   const [rwandanLanguage, setRwandanLanguage] = useState("Kinyarwanda");
@@ -51,6 +66,7 @@ export default function Home() {
   const [turns, dispatchConversation] = useReducer(conversationReducer, []);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isSpeechChoiceOpen, setIsSpeechChoiceOpen] = useState(false);
   const { sourceLanguage, targetLanguage } = getLanguageDirection(
     activeSpeaker,
     visitorLanguage,
@@ -60,9 +76,7 @@ export default function Home() {
   const activeSpeakerLabel = SPEAKER_LABELS[activeSpeaker];
   const listenerLabel = SPEAKER_LABELS[listenerSide];
   const addSpeechTranscript = useCallback((transcript) => {
-    setMessage((currentMessage) =>
-      mergeSpeechTranscript(currentMessage, transcript),
-    );
+    setMessage(mergeSpeechTranscript(speechDraftBaseRef.current, transcript));
   }, []);
   const {
     status: speechStatus,
@@ -78,7 +92,55 @@ export default function Home() {
   const isSpeechActive =
     speechStatus === "listening" || speechStatus === "processing";
 
+  function beginSpeechRecognition(recognitionLanguage) {
+    speechDraftBaseRef.current = message;
+    startListening(recognitionLanguage);
+  }
+
+  useEffect(() => {
+    if (!isSpeechChoiceOpen) {
+      return undefined;
+    }
+
+    firstSpeechChoiceRef.current?.focus();
+
+    function closeOnEscape(event) {
+      if (event.key === "Escape") {
+        setIsSpeechChoiceOpen(false);
+      }
+    }
+
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [isSpeechChoiceOpen]);
+
+  function handleMicrophoneClick() {
+    if (isSpeechActive) {
+      cancelListening();
+      return;
+    }
+
+    if (shouldShowVisitorSpeechChoice(activeSpeaker)) {
+      setIsSpeechChoiceOpen(true);
+      return;
+    }
+
+    beginSpeechRecognition();
+  }
+
+  function startVisitorRecognition(optionId) {
+    const recognitionLanguage =
+      getVisitorSpeechRecognitionLanguage(optionId);
+
+    setIsSpeechChoiceOpen(false);
+
+    if (recognitionLanguage) {
+      beginSpeechRecognition(recognitionLanguage);
+    }
+  }
+
   function changeParticipantLanguage(participant, language) {
+    setIsSpeechChoiceOpen(false);
     cancelListening();
 
     if (participant === "visitor") {
@@ -93,6 +155,7 @@ export default function Home() {
       return;
     }
 
+    setIsSpeechChoiceOpen(false);
     cancelListening();
     setActiveSpeaker(speakerSide);
     setMessage("");
@@ -100,6 +163,7 @@ export default function Home() {
   }
 
   function startNewConversation() {
+    setIsSpeechChoiceOpen(false);
     cancelListening();
     dispatchConversation({ type: "clear" });
     setActiveSpeaker("visitor");
@@ -419,7 +483,7 @@ export default function Home() {
                     ? "Cancel listening"
                     : `Speak in ${sourceLanguage}`
               }
-              onClick={isSpeechActive ? cancelListening : startListening}
+              onClick={handleMicrophoneClick}
               disabled={isLoading || speechStatus === "unavailable"}
             >
               <MicrophoneIcon />
@@ -471,6 +535,50 @@ export default function Home() {
             </button>
           </div>
         </form>
+
+        {isSpeechChoiceOpen ? (
+          <div
+            className="speech-choice-backdrop"
+            onClick={(event) => {
+              if (event.target === event.currentTarget) {
+                setIsSpeechChoiceOpen(false);
+              }
+            }}
+          >
+            <div
+              className="speech-choice-dialog"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={speechChoiceTitleId}
+            >
+              <h3 id={speechChoiceTitleId}>How should Kasuku listen?</h3>
+              <div className="speech-choice-options">
+                {VISITOR_SPEECH_RECOGNITION_OPTIONS.map((option, index) => (
+                  <button
+                    className="speech-choice-option"
+                    type="button"
+                    key={option.id}
+                    ref={index === 0 ? firstSpeechChoiceRef : null}
+                    onClick={() => startVisitorRecognition(option.id)}
+                  >
+                    <span>{option.title}</span>
+                    <small>{option.helper}</small>
+                    {option.id === "kinyarwanda" ? (
+                      <em>Microphone recognition only</em>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+              <button
+                className="speech-choice-cancel"
+                type="button"
+                onClick={() => setIsSpeechChoiceOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <footer>

@@ -15,6 +15,7 @@ function getAvailability(language) {
     return {
       status: "unavailable",
       message: `Voice input is not configured for ${language}. You can keep typing.`,
+      locale: null,
     };
   }
 
@@ -22,18 +23,21 @@ function getAvailability(language) {
     return {
       status: "unavailable",
       message: "Voice input is not available in this browser. You can keep typing.",
+      locale,
     };
   }
 
-  return { status: "idle", message: "" };
+  return { status: "idle", message: "", locale };
 }
 
 export function useSpeechRecognition({ language, onTranscript }) {
   const [speechState, setSpeechState] = useState({
     status: "idle",
     message: "",
+    locale: getSpeechRecognitionLocale(language),
   });
   const sessionRef = useRef(null);
+  const sessionIdRef = useRef(0);
   const transcriptCallbackRef = useRef(onTranscript);
 
   useEffect(() => {
@@ -41,6 +45,7 @@ export function useSpeechRecognition({ language, onTranscript }) {
   }, [onTranscript]);
 
   const disposeSession = useCallback(() => {
+    sessionIdRef.current += 1;
     sessionRef.current?.dispose();
     sessionRef.current = null;
   }, []);
@@ -52,10 +57,11 @@ export function useSpeechRecognition({ language, onTranscript }) {
     return disposeSession;
   }, [disposeSession, language]);
 
-  const startListening = useCallback(() => {
+  const startListening = useCallback((recognitionLanguage = language) => {
     disposeSession();
+    const sessionId = sessionIdRef.current;
 
-    const locale = getSpeechRecognitionLocale(language);
+    const locale = getSpeechRecognitionLocale(recognitionLanguage);
     const RecognitionConstructor =
       typeof window === "undefined"
         ? null
@@ -64,7 +70,8 @@ export function useSpeechRecognition({ language, onTranscript }) {
     if (!locale) {
       setSpeechState({
         status: "unavailable",
-        message: `Voice input is not configured for ${language}. You can keep typing.`,
+        message: `Voice input is not configured for ${recognitionLanguage}. You can keep typing.`,
+        locale: null,
       });
       return;
     }
@@ -73,35 +80,65 @@ export function useSpeechRecognition({ language, onTranscript }) {
       setSpeechState({
         status: "unavailable",
         message: "Voice input is not available in this browser. You can keep typing.",
+        locale,
       });
       return;
     }
 
     let session;
+    let hasTranscript = false;
 
     try {
       session = createSpeechRecognitionSession({
         RecognitionConstructor,
-        language,
+        language: recognitionLanguage,
         onStatusChange(status) {
-          setSpeechState((current) => ({ ...current, status }));
+          if (sessionId !== sessionIdRef.current) {
+            return;
+          }
+
+          if (status === "idle") {
+            sessionRef.current = null;
+          }
+
+          setSpeechState((current) => ({
+            ...current,
+            status,
+            message:
+              status === "idle"
+                ? hasTranscript
+                  ? "Transcript added. Review or edit it before sending."
+                  : "Listening ended. Try again or keep typing."
+                : current.message,
+          }));
         },
-        onTranscript(transcript) {
-          transcriptCallbackRef.current(transcript);
+        onTranscript(transcript, transcriptState) {
+          if (sessionId !== sessionIdRef.current) {
+            return;
+          }
+
+          hasTranscript = true;
+          transcriptCallbackRef.current(transcript, transcriptState);
           setSpeechState({
-            status: "processing",
-            message: "Transcript added. Review or edit it before sending.",
+            status: "listening",
+            message: `Listening in ${recognitionLanguage} (${locale})… Transcript updates as you speak.`,
+            locale,
           });
         },
         onError(message) {
-          setSpeechState({ status: "error", message });
+          if (sessionId !== sessionIdRef.current) {
+            return;
+          }
+
+          setSpeechState({ status: "error", message, locale });
         },
       });
 
       sessionRef.current = session;
       setSpeechState({
         status: "listening",
-        message: `Listening in ${language} (${locale})…`,
+        message: `Listening in ${recognitionLanguage} (${locale})…`,
+        locale,
       });
       session.start();
     } catch (error) {
@@ -114,17 +151,21 @@ export function useSpeechRecognition({ language, onTranscript }) {
       setSpeechState({
         status: "error",
         message: isUnsupportedLocale
-          ? `${language} speech recognition (${locale}) was rejected by this browser. You can keep typing.`
+          ? `${recognitionLanguage} speech recognition (${locale}) was rejected by this browser. You can keep typing.`
           : "Speech recognition could not start. You can keep typing your message.",
+        locale,
       });
     }
   }, [disposeSession, language]);
 
   const cancelListening = useCallback(() => {
-    if (sessionRef.current) {
-      sessionRef.current.cancel();
-      sessionRef.current.dispose();
+    const session = sessionRef.current;
+
+    if (session) {
+      sessionIdRef.current += 1;
       sessionRef.current = null;
+      session.cancel();
+      session.dispose();
     }
 
     const availability = getAvailability(language);
@@ -133,6 +174,7 @@ export function useSpeechRecognition({ language, onTranscript }) {
         ? {
             status: "idle",
             message: "Listening cancelled. You can keep typing.",
+            locale: availability.locale,
           }
         : availability,
     );
@@ -144,7 +186,7 @@ export function useSpeechRecognition({ language, onTranscript }) {
 
   return {
     ...speechState,
-    locale: getSpeechRecognitionLocale(language),
+    locale: speechState.locale,
     startListening,
     cancelListening,
     clearSpeechMessage,

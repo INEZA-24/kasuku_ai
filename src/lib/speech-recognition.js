@@ -3,6 +3,33 @@ export const SPEECH_RECOGNITION_LOCALES = Object.freeze({
   Kinyarwanda: "rw-RW",
 });
 
+export const VISITOR_SPEECH_RECOGNITION_OPTIONS = Object.freeze([
+  Object.freeze({
+    id: "normal",
+    title: "Start normally",
+    helper: "Best for English speech.",
+    recognitionLanguage: "English",
+  }),
+  Object.freeze({
+    id: "kinyarwanda",
+    title: "Better Kinyarwanda recognition",
+    helper: "Better for Rwandan names and local vocabulary.",
+    recognitionLanguage: "Kinyarwanda",
+  }),
+]);
+
+export function getVisitorSpeechRecognitionLanguage(optionId) {
+  return (
+    VISITOR_SPEECH_RECOGNITION_OPTIONS.find(
+      (option) => option.id === optionId,
+    )?.recognitionLanguage ?? null
+  );
+}
+
+export function shouldShowVisitorSpeechChoice(speakerSide) {
+  return speakerSide === "visitor";
+}
+
 export function getSpeechRecognitionLocale(language) {
   return SPEECH_RECOGNITION_LOCALES[language] ?? null;
 }
@@ -65,6 +92,85 @@ export function mergeSpeechTranscript(currentText, transcript) {
   return `${existing} ${recognized}`;
 }
 
+function joinTranscriptSegments(segments) {
+  return [...segments.entries()]
+    .sort(([leftIndex], [rightIndex]) => leftIndex - rightIndex)
+    .map(([, transcript]) => transcript)
+    .join(" ")
+    .trim();
+}
+
+export function createSpeechTranscriptAccumulator() {
+  const finalSegments = new Map();
+  const interimSegments = new Map();
+
+  function getSnapshot() {
+    const finalTranscript = joinTranscriptSegments(finalSegments);
+    const interimTranscript = joinTranscriptSegments(interimSegments);
+
+    return {
+      finalTranscript,
+      interimTranscript,
+      combinedTranscript: [finalTranscript, interimTranscript]
+        .filter(Boolean)
+        .join(" ")
+        .trim(),
+    };
+  }
+
+  return {
+    reset() {
+      finalSegments.clear();
+      interimSegments.clear();
+    },
+    update(event) {
+      const resultCount = event?.results?.length ?? 0;
+      const startIndex = Number.isInteger(event?.resultIndex)
+        ? event.resultIndex
+        : 0;
+
+      for (const index of [...interimSegments.keys()]) {
+        if (index >= resultCount) {
+          interimSegments.delete(index);
+        }
+      }
+
+      for (let index = startIndex; index < resultCount; index += 1) {
+        const result = event.results[index];
+        const rawTranscript = result?.[0]?.transcript;
+        const transcript =
+          typeof rawTranscript === "string" ? rawTranscript.trim() : "";
+
+        if (result?.isFinal) {
+          interimSegments.delete(index);
+
+          if (transcript) {
+            finalSegments.set(index, transcript);
+          } else {
+            finalSegments.delete(index);
+          }
+
+          continue;
+        }
+
+        if (finalSegments.has(index)) {
+          interimSegments.delete(index);
+          continue;
+        }
+
+        if (transcript) {
+          interimSegments.set(index, transcript);
+        } else {
+          interimSegments.delete(index);
+        }
+      }
+
+      return getSnapshot();
+    },
+    getSnapshot,
+  };
+}
+
 export function createSpeechRecognitionSession({
   RecognitionConstructor,
   language,
@@ -79,13 +185,15 @@ export function createSpeechRecognitionSession({
   }
 
   const recognition = new RecognitionConstructor();
+  const transcriptAccumulator = createSpeechTranscriptAccumulator();
   let cancelled = false;
   let disposed = false;
   let failed = false;
+  let ended = false;
 
   recognition.lang = locale;
-  recognition.continuous = false;
-  recognition.interimResults = false;
+  recognition.continuous = true;
+  recognition.interimResults = true;
   recognition.maxAlternatives = 1;
 
   recognition.onstart = () => {
@@ -95,24 +203,19 @@ export function createSpeechRecognitionSession({
   };
 
   recognition.onresult = (event) => {
-    if (disposed || cancelled) {
+    if (disposed || cancelled || ended) {
       return;
     }
 
-    onStatusChange("processing");
-    const transcript = extractSpeechTranscript(event);
+    const transcriptState = transcriptAccumulator.update(event);
 
-    if (transcript) {
-      onTranscript(transcript);
-      return;
+    if (transcriptState.combinedTranscript) {
+      onTranscript(transcriptState.combinedTranscript, transcriptState);
     }
-
-    failed = true;
-    onError("No speech was recognized. Try again or type your message.");
   };
 
   recognition.onerror = (event) => {
-    if (disposed || cancelled || event?.error === "aborted") {
+    if (disposed || cancelled || ended || event?.error === "aborted") {
       return;
     }
 
@@ -121,7 +224,13 @@ export function createSpeechRecognitionSession({
   };
 
   recognition.onend = () => {
-    if (!disposed && !failed) {
+    if (disposed || ended) {
+      return;
+    }
+
+    ended = true;
+
+    if (!cancelled && !failed) {
       onStatusChange("idle");
     }
   };
@@ -129,9 +238,10 @@ export function createSpeechRecognitionSession({
   return {
     locale,
     start() {
+      transcriptAccumulator.reset();
       cancelled = false;
       failed = false;
-      onStatusChange("listening");
+      ended = false;
       recognition.start();
     },
     cancel() {

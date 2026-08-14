@@ -6,9 +6,9 @@ Kasuku
 
 ## Current milestone
 
-M6 — Speech-to-text
+M6 — Interpretation intelligence for natural mixed Kinyarwanda
 
-Status: implementation complete as of 2026-08-13. All 22 automated tests and the production build pass. Real microphone accuracy remains device/browser dependent and could not be exercised in this non-interactive environment.
+Status: mixed-language interpretation prompt improvement complete as of 2026-08-14. All 34 automated tests and the production build pass. Raw transcripts, Web Speech behavior, the Visitor popup, translation direction, conversation history, and UI remain unchanged.
 
 ## Completed work
 
@@ -62,6 +62,23 @@ Status: implementation complete as of 2026-08-13. All 22 automated tests and the
 - Added lifecycle cleanup so switching participants, changing either participant language, clearing the conversation, starting another recognition attempt, or unmounting safely aborts the current short-lived recognition instance.
 - Kept the textarea usable during speech errors and unavailable states, with plain-language feedback for permission denial, missing microphone, no speech, network failure, unsupported locale, and unexpected failure.
 - Added no audio capture storage, audio files, audio uploads, or application-level recording retention.
+- Returned speech recognition to stable M6 baseline for broad real-browser testing before selecting any further STT strategy.
+- Removed all M6.1–M6.3 contextual phrase biasing, phrase boosts, `SpeechRecognitionPhrase`, `phrases-not-supported` retry logic, and experimental follow-on state machinery.
+- Preserved the original browser `SpeechRecognition`/`webkitSpeechRecognition` architecture, `en-US` and `rw-RW` locales, editable non-auto-submitted transcripts, cancellation, participant switching, and typing fallback.
+- Added a small Visitor-only microphone dialog that appears before every recording and offers normal English recognition, Kinyarwanda-prioritized recognition, or cancellation.
+- Kept the Rwandan microphone direct: it starts immediately with `rw-RW` and does not show the Visitor dialog.
+- Added outside-click and Escape dismissal, initial keyboard focus, mobile-friendly cream/bordered styling, and an explicit “Microphone recognition only” note for the Kinyarwanda option.
+- Kept recognition mode ephemeral. The dialog appears for every Visitor recording, and selecting `rw-RW` never changes the Visitor language, translation direction, transcript, or interpretation request.
+- Enabled `continuous` and `interimResults` on every recognition instance so normal conversational speech can span short pauses and update the editable textarea while the speaker continues.
+- Added a per-session result-index accumulator that stores final and interim chunks separately, promotes interim text without duplication, and preserves every finalized phrase in order.
+- Isolated every recording with a new session ID, fresh transcript accumulator, reset cancellation/error/completion flags, and stale-callback guards so completed or cancelled recordings cannot block or overwrite the next recording.
+- Kept the existing draft-merge behavior intentionally: each recording owns a replaceable live transcript contribution, while a new recording starts from the textarea content that existed when its microphone session began.
+- Removed no popup behavior and added no timer, automatic restart, background listening, provider, transcript correction, contextual phrase biasing, API, history, interpretation, TTS, or M7 work.
+- Expanded only the server-side EjoChat interpreter contract to recognize natural Kinyarwanda mixed with English, French, or Swahili, including borrowed words, phonetic adaptations, Kinyarwanda prefixes/plurals, technical vocabulary, and local transport/place/business terms.
+- Directed EjoChat to infer adapted vocabulary from the whole sentence, selected context, relevant recent history, and surrounding words, preferring well-supported intended meaning over literal word-for-word output.
+- Added the supplied `amaseriveri ya Google arakomeye` semantic example so `amaseriveri` can be understood contextually as an adapted form of “servers.”
+- Added a conservative evidence rule: weak phonetic resemblance cannot justify changing names, places, businesses, or technical terms; `Google is too far` must retain Google rather than become Nyabugogo.
+- Reaffirmed that current text is raw source evidence, must not be rewritten or corrected, questions must be interpreted rather than answered, and output must contain only the target-language message.
 
 ## Files changed
 
@@ -76,16 +93,16 @@ Status: implementation complete as of 2026-08-13. All 22 automated tests and the
 - `next.config.mjs` — minimal strict-mode Next.js configuration.
 - `jsconfig.json` — JavaScript project path alias configuration.
 - `src/app/layout.js` — root App Router layout and Kasuku metadata, moved from `app/`.
-- `src/app/page.js` — explicit Visitor/Rwandan state, participant language selectors, derived direction, active-speaker control, role-aware composer, and shared history rendering.
-- `src/app/globals.css` — mobile-first speaker switch plus microphone listening/processing/error feedback, cancel control, and active-listening animation.
+- `src/app/page.js` — Visitor speech-choice dialog plus a per-recording draft base so interim updates replace the current session contribution instead of repeatedly appending it.
+- `src/app/globals.css` — mobile-first speaker switch, microphone feedback, and compact cream/bordered speech-choice dialog.
 - `src/app/api/translate/route.js` — validates `visitor`/`rwandan` history and defaults omitted speaker identity to Visitor.
-- `src/app/api/translate/prompt.js` — names the active speaker/listener and strengthens cross-direction reference and indirect-request handling.
+- `src/app/api/translate/prompt.js` — names the active speaker/listener, handles cross-direction references, and adds conservative mixed-language/borrowed-word interpretation guidance without transcript rewriting.
 - `src/lib/conversation.js` — explicit speaker identities/labels, direction derivation, other-speaker lookup, reducer, and unchanged six-turn selector.
-- `src/lib/speech-recognition.js` — locale mapping, standard/WebKit constructor selection, transcript extraction/merge, error normalization, and disposable single-utterance recognition sessions.
-- `src/hooks/use-speech-recognition.js` — client-only React lifecycle adapter for availability, start, cancel, transcript delivery, errors, language changes, and cleanup.
-- `test/interpretation-context.test.js` — M3–M5 prompt/route contracts, including mixed-direction Rwandan history forwarding.
+- `src/lib/speech-recognition.js` — locale and Visitor-mode definitions plus continuous recognition, indexed final/interim accumulation, transcript helpers, and disposable session lifecycle.
+- `src/hooks/use-speech-recognition.js` — client-only lifecycle adapter with per-recording locale overrides, session IDs, stale-callback guards, normal-end cleanup, cancellation, and repeated-recording support.
+- `test/interpretation-context.test.js` — M3–M5 contracts plus raw mixed-language forwarding, adapted technical semantics, and anti-guessing coverage for the supplied phrases.
 - `test/conversation-model.test.js` — M4/M5 chronology, six-turn window, clear/failure behavior, automatic reversal, switch-back, and history-preservation tests.
-- `test/speech-recognition.test.js` — M6 locale, transcript, non-submission, permission, unavailable, cancellation, speaker-switch, clear/reuse, and typing-fallback coverage with browser API mocks.
+- `test/speech-recognition.test.js` — M6 locale/popup coverage plus continuous/interim configuration, ordered final accumulation, interim promotion, duplicate prevention, natural-pause, repeated-session, cancellation-recovery, and participant-switch recovery tests.
 - `.env.example` — documents the required `EJOCHAT_API_KEY` variable without a real secret.
 
 ## Architectural decisions
@@ -122,12 +139,20 @@ Status: implementation complete as of 2026-08-13. All 22 automated tests and the
 - Keep speaker changes explicit through the shared-phone control; do not infer or automatically detect who is speaking.
 - Preserve context, participant languages, and all successful turns when switching speakers. Clear only the unsent draft/error during a switch so text cannot be submitted under the wrong speaker or language.
 - `New conversation` clears history and resets the active turn to Visitor without changing Transport or the selected participant languages.
-- Keep speech recognition browser-only and client-side. Kasuku creates one non-continuous recognition instance per user action and requests one final transcript; it does not manage or retain raw audio.
+- Keep speech recognition browser-only and client-side. Kasuku creates one continuous recognition instance per user action, collects final and interim results until stop/end/error, and does not manage or retain raw audio.
 - Map speech locales centrally by Kasuku language name. M6 maps only English to `en-US` and Kinyarwanda to `rw-RW`; an unmapped language disables voice with a typing fallback.
 - Prefer `window.SpeechRecognition`, falling back only to `window.webkitSpeechRecognition` when the standard constructor is absent.
 - Never auto-submit speech. Merge recognized text into the controlled textarea and preserve the existing manual Send action.
 - Treat participant/language changes as recognition-session boundaries. Cancel first, then update the active side or locale so an old-language transcript cannot enter the new speaker's draft.
 - Surface runtime rejection of `rw-RW` without substituting English or another locale; typed input and the rest of Kasuku remain available.
+- Keep the stable M6 implementation free of contextual phrase biasing and post-recognition rewriting until broad real-browser testing informs any future STT strategy.
+- Treat the Visitor choice as a one-recording Web Speech locale override only. Conversation direction continues to derive exclusively from active speaker plus participant languages, so optional `rw-RW` recognition cannot change English → Kinyarwanda interpretation.
+- Define the Visitor choices in the speech library and pass only the selected recognition language into the existing hook; do not persist a mode or add an STT correction layer.
+- Treat each microphone action as an isolated session. Reset transcript, final/interim, cancellation, failure, completion, and callback identity state before starting; invalidate old callbacks on cancel, participant/language change, clear, replacement, or unmount.
+- Use `SpeechRecognitionEvent.resultIndex` and stable result indexes as accumulator keys. Repeated cumulative final results replace the same indexed segment, while current interim segments remain separate until promoted.
+- Do not add an application timer or automatically restart after `onend`; continuous recognition lasts only as long as the browser session genuinely remains active and the user has not cancelled it.
+- Handle borrowed and code-switched vocabulary as an interpretation concern in the server prompt, never as transcript mutation or post-STT correction.
+- Permit semantic adaptation only when sentence structure, selected context, recent history, or surrounding vocabulary provides clear evidence; otherwise preserve the supplied term, name, and ambiguity.
 
 ## Commands run
 
@@ -167,6 +192,15 @@ Status: implementation complete as of 2026-08-13. All 22 automated tests and the
 - Ran `npm.cmd run build`; the optimized Next.js 16.3.0 build passed with `/` and `/api/translate` intact.
 - Checked for the cataloged `agent-browser` CLI; it is not installed in this environment.
 - Attempted a non-recording headless Chrome capability probe for the Web Speech constructor and `rw-RW` configuration. Chrome returned no usable DOM result in both default and isolated-profile attempts, so the runtime capability result is recorded as inconclusive rather than supported.
+- Compared all M6.1–M6.3 speech files against `HEAD` and restored the pre-M6.1 implementations without reverting unrelated project work.
+- Ran `npm.cmd test` after restoring the stable M6 baseline; all 22 original tests passed.
+- Ran `npm.cmd run build`; the optimized Next.js 16.3.0 production build passed with `/` static and `/api/translate` dynamic.
+- Ran `npm.cmd test` after adding the Visitor speech-mode chooser; all 26 tests passed.
+- Ran `npm.cmd run build` after the speech UX update; the optimized Next.js 16.3.0 production build passed with `/` static and `/api/translate` dynamic.
+- Ran `npm.cmd test` after the continuous-session reliability implementation; all 31 tests passed.
+- Ran `npm.cmd run build` after the reliability implementation; the optimized Next.js 16.3.0 production build passed with `/` static and `/api/translate` dynamic.
+- Ran `npm.cmd test` after the mixed-language prompt update; all 34 tests passed.
+- Ran `npm.cmd run build` after the interpretation-intelligence update; the optimized Next.js 16.3.0 production build passed with `/` static and `/api/translate` dynamic.
 
 ## Tests performed
 
@@ -220,7 +254,33 @@ Status: implementation complete as of 2026-08-13. All 22 automated tests and the
 - Clear-conversation microphone test: recognition was cancelled/disposed and a fresh session worked afterward.
 - Manual text fallback test: draft text remained editable and accepted more typing after a simulated speech error.
 - M6 production build: passed; `/` remains static and `/api/translate` remains dynamic.
-- M6 scope check: no TTS, continuous/background listening, auto-submit, automatic speaker/turn detection, Android/native functionality, wake word, database, or M7 implementation was added.
+- Original M6 scope check: no TTS, background listening, auto-submit, automatic speaker/turn detection, Android/native functionality, wake word, database, or M7 implementation was added.
+- Stable M6 rollback verification: source, hook, page integration, styles, and speech tests match the pre-M6.1 `HEAD` versions.
+- Experimental-code scan: no contextual phrase, boost, `SpeechRecognitionPhrase`, `phrases-not-supported`, hint-builder, or retry symbol remains under `src/` or `test/`.
+- Stable M6 automated suite: 22/22 passed, including M4/M5 history/direction coverage and M6 locale, transcript, non-submission, permission, cancellation, participant-switch, clear/reuse, error, and typing-fallback coverage.
+- Stable M6 production build: passed; `/` remains static and `/api/translate` remains dynamic.
+- Visitor normal-mode test: passed; the selection resolves to English recognition and creates an `en-US` browser session.
+- Visitor Kinyarwanda-mode test: passed; the selection creates an `rw-RW` browser session while conversation direction remains English → Kinyarwanda.
+- Visitor cancel test: passed; cancellation resolves to no recognition language and creates no browser recognition session.
+- Rwandan direct-mode test: passed; the Rwandan side bypasses the chooser and creates an `rw-RW` session.
+- Existing editable-transcript, non-auto-submit, permission, cancellation, participant-switch, clear/reuse, error, M4 history, M5 direction, and interpretation-route tests remain passing; total suite 26/26.
+- Production build after the speech UX update: passed; `/` remains static and `/api/translate` remains dynamic.
+- Continuous configuration test: passed; every recognition instance uses `continuous = true`, `interimResults = true`, and no application timeout.
+- Multi-final tests: passed for one, two, and three final chunks across separate result events and natural pauses; all text remains ordered.
+- Interim promotion test: passed; updated interim wording replaces the prior interim and is promoted to final without duplicated words.
+- Repeated cumulative-results test: passed; replayed previously final indexes replace stored segments rather than appending duplicates.
+- Repeated-recording test: passed; recording one ends, recording two starts with isolated state, and both independently deliver textarea transcripts.
+- Recovery tests: passed after cancellation, participant switching, and clearing the conversation; stale/late events cannot populate the next session.
+- Interim-only normal-end test: passed; the latest usable transcript already shown in the textarea remains when the browser ends before marking it final.
+- Full automated suite after the reliability update: 31/31 passed, including unchanged popup locales, translation direction, M4 history, M5 switching, and interpretation-route coverage.
+- Production build after the reliability update: passed; `/` remains static and `/api/translate` remains dynamic.
+- Mixed-language prompt test: passed for Kinyarwanda combined with English, French, and local terms; every supplied current message remains byte-for-byte unchanged inside the prompt message content apart from the existing outer trim boundary.
+- Adapted technical-word test: passed; the prompt explicitly connects `amaseriveri` with the context-supported “servers” meaning and preserves Google as the owner.
+- Vocabulary cases covered: `ndashaka moto`, `server ya website ntabwo ikora`, `ndashaka kujya kuri ATM mbere`, and `ndashaka charger ya telefone avant kujya i Remera`.
+- Anti-guessing test: passed; the prompt requires evidence, preserves names/uncertainty, and explicitly forbids changing `Google is too far` into Nyabugogo.
+- Interpreter-role coverage remains passing: questions are translated rather than answered, and output is restricted to the target-language message without explanations or alternatives.
+- Full automated suite after the interpretation prompt update: 34/34 passed, including unchanged speech reliability, popup locales, M4 history, M5 direction, and route forwarding.
+- Production build after the interpretation prompt update: passed; `/` remains static and `/api/translate` remains dynamic.
 
 ## Known issues
 
@@ -237,6 +297,10 @@ Status: implementation complete as of 2026-08-13. All 22 automated tests and the
 - Browser speech recognition may require user permission, a working microphone, a secure/localhost origin, network connectivity, and browser/vendor recognition services.
 - French and Swahili remain available for typed interpretation but deliberately have no M6 speech locale mapping; voice input shows unavailable for those selections.
 - `SpeechRecognition` does not expose a reliable locale-support enumeration API, so accepting `recognition.lang = "rw-RW"` would not by itself prove that the runtime can recognize Kinyarwanda.
+- The stable M6 baseline provides no contextual vocabulary biasing. Mixed-language words and Rwandan place-name accuracy depend entirely on the browser/OS recognition model and must be assessed through broad real-browser testing.
+- Selecting “Better Kinyarwanda recognition” asks the browser for `rw-RW`; it changes recognition priority only, does not guarantee mixed-language or place-name accuracy, and may still be rejected by some browsers.
+- `continuous = true` allows multiple results but does not force every browser/vendor service to keep a session open indefinitely; a browser may still emit a genuine `onend` after silence or service-side limits. Kasuku preserves collected text and allows a clean new recording instead of auto-restarting.
+- Prompt rules improve EjoChat's chances of understanding mixed and adapted vocabulary but cannot guarantee every ambiguous local spelling; conservative preservation is intentional when context is insufficient.
 
 ## Unresolved questions
 
@@ -249,4 +313,4 @@ Status: implementation complete as of 2026-08-13. All 22 automated tests and the
 
 ## Exact next step
 
-M7 Kinyarwanda TTS
+M7 Kinyarwanda TTS integration
