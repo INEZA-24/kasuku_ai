@@ -6,9 +6,9 @@ Kasuku
 
 ## Current milestone
 
-M6 — Interpretation intelligence for natural mixed Kinyarwanda
+M7 — Kinyarwanda text-to-speech
 
-Status: mixed-language interpretation prompt improvement complete as of 2026-08-14. All 34 automated tests and the production build pass. Raw transcripts, Web Speech behavior, the Visitor popup, translation direction, conversation history, and UI remain unchanged.
+Status: M7 implementation complete as of 2026-08-14. All 42 automated tests, the production build, live Space schema inspection, live synthesis, and a live `/api/tts` smoke test pass. TTS remains optional and independent from translation.
 
 ## Completed work
 
@@ -79,6 +79,14 @@ Status: mixed-language interpretation prompt improvement complete as of 2026-08-
 - Added the supplied `amaseriveri ya Google arakomeye` semantic example so `amaseriveri` can be understood contextually as an adapted form of “servers.”
 - Added a conservative evidence rule: weak phonetic resemblance cannot justify changing names, places, businesses, or technical terms; `Google is too far` must retain Google rather than become Nyabugogo.
 - Reaffirmed that current text is raw source evidence, must not be rewritten or corrected, questions must be interpreted rather than answered, and output must contain only the target-language message.
+- Installed the official `@gradio/client` package and inspected the public `Professor/c4ir-rw-kinyarwandatts` Space with `Client.connect()` and `client.view_api()` before implementing the provider call.
+- Confirmed the named endpoint `/synthesize_audio` accepts `text` (string), `speaker_name` (`Female 1`, `Female 2`, or `Male`, default `Male`), and `speed` (number from 0.5 to 2.0, default `1`); it returns Audio `FileData` plus a Markdown timing string.
+- Added independent `POST /api/tts` validation and server-only Gradio integration using fixed MVP defaults `Male` and `1.0`, with a 2,000-character limit and safe timeout/failure mapping.
+- Kept provider file URLs out of the UI. The server resolves `result.data[0].url`, downloads the generated WAV, normalizes generic `application/octet-stream` to `audio/wav`, and returns only audio bytes to the browser.
+- Added a small Listen control only to interpretation bubbles whose target language is Kinyarwanda. Translation text renders first; no TTS request occurs until the user presses Listen.
+- Added independent per-turn loading, playing, ready/replay, and error states. Loading disables duplicate generation clicks without blocking typing, speaker switching, new interpretations, or existing translations.
+- Cached successful audio per turn for replay, stopped other active turn audio before playback, and revoked object URLs when starting a new conversation or unmounting.
+- Added friendly text-only fallback when generation or playback fails. No token or new environment variable is required by the currently public Space.
 
 ## Files changed
 
@@ -89,20 +97,27 @@ Status: mixed-language interpretation prompt improvement complete as of 2026-08-
 - `project-docs/TESTING.md` — test layers, coverage matrix, AI evaluation, security, and milestone gates.
 - `project-docs/AI_HANDOFF.md` — current state and continuation instructions.
 - `.gitignore` — ignores dependencies, Next.js output, environment secrets, logs, and Vercel state.
-- `package.json` — Next.js/React dependencies, ESM package mode, and development, build, start, and test scripts.
+- `package.json` — Next.js/React dependencies, official `@gradio/client`, ESM package mode, and development, build, start, and test scripts.
+- `package-lock.json` — reproducible dependency lock including `@gradio/client` 2.5.0.
 - `next.config.mjs` — minimal strict-mode Next.js configuration.
 - `jsconfig.json` — JavaScript project path alias configuration.
 - `src/app/layout.js` — root App Router layout and Kasuku metadata, moved from `app/`.
-- `src/app/page.js` — Visitor speech-choice dialog plus a per-recording draft base so interim updates replace the current session contribution instead of repeatedly appending it.
-- `src/app/globals.css` — mobile-first speaker switch, microphone feedback, and compact cream/bordered speech-choice dialog.
+- `src/app/page.js` — existing conversation/speech UI plus Kinyarwanda-target-only per-turn Listen, preparing, replay, and fallback controls.
+- `src/app/globals.css` — existing mobile styles plus a compact message-level Listen control and non-blocking voice feedback.
+- `src/app/api/tts/provider.js` — official Gradio client adapter for the inspected Space endpoint, fixed voice/speed defaults, provider timeouts, FileData URL resolution, and WAV download normalization.
+- `src/app/api/tts/handler.js` — dependency-injectable `/api/tts` validation, binary response, and safe provider-error boundary.
+- `src/app/api/tts/route.js` — independent App Router `POST /api/tts` route wiring.
 - `src/app/api/translate/route.js` — validates `visitor`/`rwandan` history and defaults omitted speaker identity to Visitor.
 - `src/app/api/translate/prompt.js` — names the active speaker/listener, handles cross-direction references, and adds conservative mixed-language/borrowed-word interpretation guidance without transcript rewriting.
 - `src/lib/conversation.js` — explicit speaker identities/labels, direction derivation, other-speaker lookup, reducer, and unchanged six-turn selector.
 - `src/lib/speech-recognition.js` — locale and Visitor-mode definitions plus continuous recognition, indexed final/interim accumulation, transcript helpers, and disposable session lifecycle.
 - `src/hooks/use-speech-recognition.js` — client-only lifecycle adapter with per-recording locale overrides, session IDs, stale-callback guards, normal-end cleanup, cancellation, and repeated-recording support.
+- `src/hooks/use-tts-playback.js` — browser audio lifecycle adapter for on-demand generation, per-turn state, replay, and object-URL cleanup.
+- `src/lib/tts-playback.js` — Kinyarwanda eligibility, `/api/tts` browser request, and testable audio playback/cache manager.
 - `test/interpretation-context.test.js` — M3–M5 contracts plus raw mixed-language forwarding, adapted technical semantics, and anti-guessing coverage for the supplied phrases.
 - `test/conversation-model.test.js` — M4/M5 chronology, six-turn window, clear/failure behavior, automatic reversal, switch-back, and history-preservation tests.
 - `test/speech-recognition.test.js` — M6 locale/popup coverage plus continuous/interim configuration, ordered final accumulation, interim promotion, duplicate prevention, natural-pause, repeated-session, cancellation-recovery, and participant-switch recovery tests.
+- `test/tts.test.js` — M7 eligibility, discovered Gradio schema/defaults, audio success/playback, loading isolation, cached replay, cleanup, invalid input, and provider failure coverage.
 - `.env.example` — documents the required `EJOCHAT_API_KEY` variable without a real secret.
 
 ## Architectural decisions
@@ -153,6 +168,11 @@ Status: mixed-language interpretation prompt improvement complete as of 2026-08-
 - Do not add an application timer or automatically restart after `onend`; continuous recognition lasts only as long as the browser session genuinely remains active and the user has not cancelled it.
 - Handle borrowed and code-switched vocabulary as an interpretation concern in the server prompt, never as transcript mutation or post-STT correction.
 - Permit semantic adaptation only when sentence structure, selected context, recent history, or surrounding vocabulary provides clear evidence; otherwise preserve the supplied term, name, and ambiguity.
+- Keep `/api/translate` and `/api/tts` independent. A successful interpretation appends its turn immediately; TTS state never participates in conversation success or history.
+- Use only Kinyarwanda interpretation targets for M7 eligibility. English, French, and Swahili target bubbles have no Listen control.
+- Use the live-inspected Gradio `/synthesize_audio` contract with `{ text, speaker_name: "Male", speed: 1 }`; do not expose provider identifiers, voice, speed, or file URLs to presentation code.
+- Cache generated audio only in browser memory for the active page and revoke every object URL during reset/unmount; add no audio persistence or database.
+- Allow explicit retry after failure and cached replay after success, but suppress duplicate requests while a turn is loading and never retry automatically.
 
 ## Commands run
 
@@ -201,6 +221,12 @@ Status: mixed-language interpretation prompt improvement complete as of 2026-08-
 - Ran `npm.cmd run build` after the reliability implementation; the optimized Next.js 16.3.0 production build passed with `/` static and `/api/translate` dynamic.
 - Ran `npm.cmd test` after the mixed-language prompt update; all 34 tests passed.
 - Ran `npm.cmd run build` after the interpretation-intelligence update; the optimized Next.js 16.3.0 production build passed with `/` static and `/api/translate` dynamic.
+- Installed `@gradio/client` 2.5.0 with `npm.cmd install @gradio/client`; npm reported zero vulnerabilities.
+- Connected to `Professor/c4ir-rw-kinyarwandatts` with the official client and ran `client.view_api()`; discovered `/get_random_sentence` and `/synthesize_audio`, with no unnamed endpoints.
+- Called `/synthesize_audio` live with `{ text: "Muraho", speaker_name: "Male", speed: 1 }`; the Space returned Gradio FileData for `audio.wav` plus generation timing Markdown.
+- Ran `npm.cmd test` after M7; all 42 tests passed.
+- Ran `npm.cmd run build`; the optimized Next.js 16.3.0 build passed and registered dynamic `/api/translate` and `/api/tts` routes.
+- Ran a live request through Kasuku's own TTS handler with `Muraho`; it returned HTTP 200, `audio/wav`, and 38,444 audio bytes.
 
 ## Tests performed
 
@@ -281,6 +307,15 @@ Status: mixed-language interpretation prompt improvement complete as of 2026-08-
 - Interpreter-role coverage remains passing: questions are translated rather than answered, and output is restricted to the target-language message without explanations or alternatives.
 - Full automated suite after the interpretation prompt update: 34/34 passed, including unchanged speech reliability, popup locales, M4 history, M5 direction, and route forwarding.
 - Production build after the interpretation prompt update: passed; `/` remains static and `/api/translate` remains dynamic.
+- Live API schema test: `/synthesize_audio` requires `text`; supports `speaker_name` values `Female 1`, `Female 2`, and `Male`; supports `speed` 0.5–2.0; and returns Audio FileData plus Markdown.
+- Kinyarwanda eligibility tests: target Kinyarwanda exposes TTS behavior; target English does not.
+- Provider mapping test: passed for the discovered endpoint and exact fixed `{ text, speaker_name: "Male", speed: 1 }` payload.
+- Non-blocking tests: translation objects remain unchanged during loading and failure; duplicate loading clicks do not create a second request.
+- Playback tests: successful audio calls `play()`, completion enables cached replay without regeneration, and cleanup revokes the object URL.
+- Validation tests: malformed JSON, empty text, and text above 2,000 characters return HTTP 400 without calling the provider.
+- Provider failure test: returns HTTP 502 with the safe voice-unavailable message and no provider details.
+- Live Kasuku TTS route smoke test: passed with HTTP 200, normalized `audio/wav`, and 38,444 bytes for `Muraho`.
+- Full automated M7 suite: 42/42 passed; production build passed with `/api/tts` dynamic and translation behavior unchanged.
 
 ## Known issues
 
@@ -301,16 +336,17 @@ Status: mixed-language interpretation prompt improvement complete as of 2026-08-
 - Selecting “Better Kinyarwanda recognition” asks the browser for `rw-RW`; it changes recognition priority only, does not guarantee mixed-language or place-name accuracy, and may still be rejected by some browsers.
 - `continuous = true` allows multiple results but does not force every browser/vendor service to keep a session open indefinitely; a browser may still emit a genuine `onend` after silence or service-side limits. Kasuku preserves collected text and allows a clean new recording instead of auto-restarting.
 - Prompt rules improve EjoChat's chances of understanding mixed and adapted vocabulary but cannot guarantee every ambiguous local spelling; conservative preservation is intentional when context is insufficient.
+- The public Hugging Face Space may sleep, queue, change schema, become unavailable, or impose undocumented quotas. M7 uses a bounded request, no automatic retry, and the interpreted text fallback.
+- Some browsers may reject `audio.play()` after asynchronous generation under autoplay policy. Kasuku retains the generated audio and shows “Voice is ready. Tap Listen again to play it” so a second explicit click can start playback.
 
 ## Unresolved questions
 
 1. Confirm EjoChat quotas, timeout guidance, formal request-contract guarantees, and all supported language pairs; the endpoint, authentication, message roles, and response content path work in the tested English-to-Kinyarwanda flow.
-2. What are the C4IR/KiNLP TTS endpoint, authentication method, payload limits, audio format, quotas, latency expectations, and usage terms?
-3. Is Kinyarwanda TTS user-triggered or automatic, and is it required whenever the target language is Kinyarwanda or merely offered?
-4. What privacy notice/consent and content-retention statements are required when text or audio is sent to external providers?
-5. What target browsers, devices, mobile viewport sizes, and accessibility conformance level define acceptance?
-6. What input/history size limits, rate limits, and retry/timeout policies should the deployed MVP enforce beyond the M4 six-turn window?
+2. Confirm the public Space's production usage terms, quotas, concurrency limits, uptime expectations, and whether anonymous access will remain available for the demo.
+3. What privacy notice/consent and content-retention statements are required when text or audio is sent to external providers?
+4. What target browsers, devices, mobile viewport sizes, and accessibility conformance level define acceptance?
+5. What input/history size limits, rate limits, and retry/timeout policies should the deployed MVP enforce beyond the M4 six-turn window?
 
 ## Exact next step
 
-M7 Kinyarwanda TTS integration
+M8 Error handling and resilience

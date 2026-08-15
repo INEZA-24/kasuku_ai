@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { useSpeechRecognition } from "../hooks/use-speech-recognition.js";
+import { useTtsPlayback } from "../hooks/use-tts-playback.js";
 
 import {
   conversationReducer,
@@ -24,6 +25,7 @@ import {
   shouldShowVisitorSpeechChoice,
   VISITOR_SPEECH_RECOGNITION_OPTIONS,
 } from "../lib/speech-recognition.js";
+import { isKinyarwandaTtsEligible } from "../lib/tts-playback.js";
 
 const contexts = [
   { name: "Transport", icon: "↗" },
@@ -41,6 +43,21 @@ function MicrophoneIcon() {
     <svg aria-hidden="true" viewBox="0 0 24 24" width="21" height="21">
       <path
         d="M12 15.25a3.5 3.5 0 0 0 3.5-3.5v-5a3.5 3.5 0 1 0-7 0v5a3.5 3.5 0 0 0 3.5 3.5Zm6-3.75v.5a6 6 0 0 1-12 0v-.5M12 18v3m-3 0h6"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+function SpeakerIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24" width="17" height="17">
+      <path
+        d="M5 10v4h3l4 3V7l-4 3H5Zm10.5-.8a4 4 0 0 1 0 5.6m2-7.6a7 7 0 0 1 0 9.6"
         fill="none"
         stroke="currentColor"
         strokeLinecap="round"
@@ -89,6 +106,7 @@ export default function Home() {
     language: sourceLanguage,
     onTranscript: addSpeechTranscript,
   });
+  const { clearAllAudio, getPlaybackState, listenToTurn } = useTtsPlayback();
   const isSpeechActive =
     speechStatus === "listening" || speechStatus === "processing";
 
@@ -165,6 +183,7 @@ export default function Home() {
   function startNewConversation() {
     setIsSpeechChoiceOpen(false);
     cancelListening();
+    clearAllAudio();
     dispatchConversation({ type: "clear" });
     setActiveSpeaker("visitor");
     setMessage("");
@@ -396,6 +415,18 @@ export default function Home() {
                 const turnSpeakerLabel = SPEAKER_LABELS[turn.speakerSide];
                 const turnListenerLabel =
                   SPEAKER_LABELS[getOtherSpeaker(turn.speakerSide)];
+                const ttsState = getPlaybackState(turn.id);
+                const canListen = isKinyarwandaTtsEligible(turn);
+                const isPreparingVoice = ttsState.status === "loading";
+                const listenLabel = isPreparingVoice
+                  ? "Preparing voice..."
+                  : ttsState.status === "playing"
+                    ? "Playing..."
+                    : ttsState.status === "ready"
+                      ? "Replay"
+                      : ttsState.status === "error"
+                        ? "Try voice again"
+                        : "Listen";
 
                 return (
                   <li
@@ -417,6 +448,32 @@ export default function Home() {
                         <p className="message-text interpreted-text">
                           {turn.interpretedText}
                         </p>
+                        {canListen ? (
+                          <div className="tts-actions">
+                            <button
+                              className="listen-button"
+                              type="button"
+                              onClick={() => listenToTurn(turn)}
+                              disabled={isPreparingVoice}
+                              aria-label={`${listenLabel} to the Kinyarwanda interpretation`}
+                            >
+                              <SpeakerIcon />
+                              <span>{listenLabel}</span>
+                            </button>
+                            {ttsState.message ? (
+                              <p
+                                className="tts-message"
+                                role={
+                                  ttsState.status === "error"
+                                    ? "alert"
+                                    : "status"
+                                }
+                              >
+                                {ttsState.message}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
                     </article>
                   </li>

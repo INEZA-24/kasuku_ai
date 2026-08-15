@@ -509,6 +509,50 @@ section {
   font-size: 1.1rem;
 }
 
+.tts-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(16, 82, 59, 0.16);
+}
+
+.listen-button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 11px;
+  border: 1px solid #9fc3ae;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--accent-dark);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.listen-button:hover,
+.listen-button:focus-visible {
+  border-color: var(--accent);
+  background: #f5faf7;
+}
+
+.listen-button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.tts-message {
+  flex: 1 1 180px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
 .history-loading {
   display: flex;
   align-items: center;
