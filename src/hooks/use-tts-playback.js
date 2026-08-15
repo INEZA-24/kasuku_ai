@@ -38,6 +38,13 @@ export function useTtsPlayback() {
     [getManager],
   );
 
+  const prepareTurnAudio = useCallback(
+    async (turn) => {
+      await getManager().prepare(turn);
+    },
+    [getManager],
+  );
+
   const clearAllAudio = useCallback(() => {
     managerRef.current?.clearAll();
     setPlaybackStates({});
@@ -57,5 +64,6 @@ export function useTtsPlayback() {
       return playbackStates[turnId] ?? DEFAULT_TTS_PLAYBACK_STATE;
     },
     listenToTurn,
+    prepareTurnAudio,
   };
 }

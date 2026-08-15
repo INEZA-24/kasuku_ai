@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
   conversationReducer,
   getLanguageDirection,
   getOtherSpeaker,
+  getParticipantDirection,
   RECENT_HISTORY_LIMIT,
   selectRecentHistory,
 } from "../src/lib/conversation.js";
@@ -110,4 +112,48 @@ test("switching speakers and languages does not mutate shared history", () => {
   getLanguageDirection("visitor", "English", "Kinyarwanda");
 
   assert.deepEqual(selectRecentHistory(turns), beforeSwitch);
+});
+
+test("the inline participant direction is derived from the active speaker", () => {
+  assert.deepEqual(
+    getParticipantDirection("visitor", "English", "Kinyarwanda"),
+    {
+      sourceParticipant: "visitor",
+      targetParticipant: "rwandan",
+      sourceLanguage: "English",
+      targetLanguage: "Kinyarwanda",
+    },
+  );
+  assert.deepEqual(
+    getParticipantDirection("rwandan", "English", "Kinyarwanda"),
+    {
+      sourceParticipant: "rwandan",
+      targetParticipant: "visitor",
+      sourceLanguage: "Kinyarwanda",
+      targetLanguage: "English",
+    },
+  );
+});
+
+test("the only interactive participant switch is inside the composer", () => {
+  const pageSource = readFileSync(
+    new URL("../src/app/page.js", import.meta.url),
+    "utf8",
+  );
+  const composerStart = pageSource.indexOf('<form className="composer"');
+  const directionControl = pageSource.indexOf(
+    'className="composer-direction-control"',
+  );
+  const textarea = pageSource.indexOf("<textarea", directionControl);
+
+  assert.ok(composerStart >= 0);
+  assert.ok(directionControl > composerStart);
+  assert.ok(textarea > directionControl);
+  assert.equal(pageSource.includes('className="speaker-panel"'), false);
+  assert.equal(pageSource.includes('className="speaker-switch"'), false);
+  assert.equal(
+    pageSource.match(/const \[activeSpeaker, setActiveSpeaker\] = useState/g)
+      ?.length,
+    1,
+  );
 });

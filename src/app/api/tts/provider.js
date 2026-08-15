@@ -4,7 +4,7 @@ export const TTS_SPACE_ID = "Professor/c4ir-rw-kinyarwandatts";
 export const TTS_SYNTHESIS_ENDPOINT = "/synthesize_audio";
 export const TTS_DEFAULTS = Object.freeze({
   speakerName: "Male",
-  speed: 1,
+  speed: 0.9,
 });
 
 const PROVIDER_TIMEOUT_MS = 90000;

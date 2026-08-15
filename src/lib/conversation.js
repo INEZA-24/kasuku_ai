@@ -52,3 +52,23 @@ export function getLanguageDirection(
 export function getOtherSpeaker(activeSpeaker) {
   return activeSpeaker === "rwandan" ? "visitor" : "rwandan";
 }
+
+export function getParticipantDirection(
+  activeParticipant,
+  visitorLanguage,
+  rwandanLanguage,
+) {
+  const targetParticipant = getOtherSpeaker(activeParticipant);
+  const { sourceLanguage, targetLanguage } = getLanguageDirection(
+    activeParticipant,
+    visitorLanguage,
+    rwandanLanguage,
+  );
+
+  return {
+    sourceParticipant: activeParticipant,
+    targetParticipant,
+    sourceLanguage,
+    targetLanguage,
+  };
+}

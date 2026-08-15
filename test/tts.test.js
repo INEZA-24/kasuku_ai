@@ -15,6 +15,7 @@ import {
   createTtsPlaybackManager,
   isKinyarwandaTtsEligible,
   TTS_FALLBACK_MESSAGE,
+  TTS_PLAYBACK_ERROR_MESSAGE,
 } from "../src/lib/tts-playback.js";
 
 function createTurn(overrides = {}) {
@@ -137,10 +138,10 @@ test("the Gradio provider uses the discovered endpoint, schema, and defaults", a
     payload: {
       text: "Muraho",
       speaker_name: "Male",
-      speed: 1,
+      speed: 0.9,
     },
   });
-  assert.deepEqual(TTS_DEFAULTS, { speakerName: "Male", speed: 1 });
+  assert.deepEqual(TTS_DEFAULTS, { speakerName: "Male", speed: 0.9 });
   assert.match(fetchedUrl, /audio\.wav$/);
   assert.equal(result.audio.byteLength, 3);
   assert.equal(result.contentType, "audio/wav");
@@ -171,9 +172,27 @@ test("TTS failure leaves the translation intact and exposes a safe fallback", as
 
   assert.equal(turn.interpretedText, "Ndashaka moto.");
   assert.deepEqual(harness.manager.getState(turn.id), {
-    status: "error",
-    message: TTS_FALLBACK_MESSAGE,
+    status: "failed",
+    message: TTS_PLAYBACK_ERROR_MESSAGE,
+    hasPlayed: false,
   });
+});
+
+test("TTS failure cannot alter translation history or the interpretation result", async () => {
+  const turn = createTurn();
+  const history = [turn];
+  const historyBeforeTts = structuredClone(history);
+  const harness = createPlaybackHarness({
+    requestAudio: async () => {
+      throw new Error("TTS unavailable");
+    },
+  });
+
+  await harness.manager.listen(turn);
+
+  assert.deepEqual(history, historyBeforeTts);
+  assert.equal(history[0].interpretedText, "Ndashaka moto.");
+  assert.equal(harness.manager.getState(turn.id).status, "failed");
 });
 
 test("completed audio replays from its cached URL without regenerating", async () => {
@@ -200,7 +219,7 @@ test("completed audio replays from its cached URL without regenerating", async (
   assert.deepEqual(harness.revokedUrls, ["blob:kasuku-1"]);
 });
 
-test("loading TTS does not alter translation and ignores duplicate requests", async () => {
+test("preparing TTS does not alter translation and ignores duplicate requests", async () => {
   let resolveAudio;
   let requestCount = 0;
   const turn = createTurn();
@@ -217,13 +236,133 @@ test("loading TTS does not alter translation and ignores duplicate requests", as
   const firstListen = harness.manager.listen(turn);
   const duplicateListen = harness.manager.listen(turn);
 
-  assert.equal(harness.manager.getState(turn.id).status, "loading");
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(harness.manager.getState(turn.id).status, "preparing");
   assert.equal(turn.interpretedText, "Ndashaka moto.");
   assert.equal(requestCount, 1);
 
   resolveAudio(new Blob(["audio"], { type: "audio/wav" }));
   await Promise.all([firstListen, duplicateListen]);
 
+  assert.equal(harness.audioInstances[0].playCount, 1);
+});
+
+test("background preparation makes one request and never plays automatically", async () => {
+  let resolveAudio;
+  let requestCount = 0;
+  const turn = createTurn();
+  const pendingAudio = new Promise((resolve) => {
+    resolveAudio = resolve;
+  });
+  const harness = createPlaybackHarness({
+    requestAudio: async () => {
+      requestCount += 1;
+      return pendingAudio;
+    },
+  });
+
+  const firstPreparation = harness.manager.prepare(turn);
+  const duplicatePreparation = harness.manager.prepare(turn);
+  await Promise.resolve();
+
+  assert.equal(harness.manager.getState(turn.id).status, "preparing");
+  assert.equal(turn.interpretedText, "Ndashaka moto.");
+  assert.equal(requestCount, 1);
+  assert.equal(harness.audioInstances.length, 0);
+
+  resolveAudio(new Blob(["audio"], { type: "audio/wav" }));
+  await Promise.all([firstPreparation, duplicatePreparation]);
+
+  assert.equal(harness.manager.getState(turn.id).status, "ready");
+  assert.equal(harness.manager.getState(turn.id).hasPlayed, false);
+  assert.equal(harness.audioInstances[0].playCount, 0);
+
+  await harness.manager.listen(turn);
+
+  assert.equal(requestCount, 1);
+  assert.equal(harness.audioInstances[0].playCount, 1);
+});
+
+test("each message keeps an independent prepared audio cache", async () => {
+  let requestCount = 0;
+  const firstTurn = createTurn({ id: "turn-a", interpretedText: "Muraho." });
+  const secondTurn = createTurn({ id: "turn-b", interpretedText: "Murakoze." });
+  const harness = createPlaybackHarness({
+    requestAudio: async () => {
+      requestCount += 1;
+      return new Blob([`audio-${requestCount}`], { type: "audio/wav" });
+    },
+  });
+
+  await Promise.all([
+    harness.manager.prepare(firstTurn),
+    harness.manager.prepare(secondTurn),
+  ]);
+
+  assert.equal(requestCount, 2);
+  assert.equal(harness.audioInstances.length, 2);
+  assert.equal(harness.manager.getState(firstTurn.id).status, "ready");
+  assert.equal(harness.manager.getState(secondTurn.id).status, "ready");
+
+  await harness.manager.listen(firstTurn);
+  harness.audioInstances[0].emit("ended");
+  await harness.manager.listen(secondTurn);
+  harness.audioInstances[1].emit("ended");
+  await harness.manager.listen(firstTurn);
+
+  assert.equal(requestCount, 2);
+  assert.equal(harness.audioInstances[0].playCount, 2);
+  assert.equal(harness.audioInstances[1].playCount, 1);
+});
+
+test("English targets never prepare Kinyarwanda audio", async () => {
+  let requestCount = 0;
+  const turn = createTurn({
+    sourceLanguage: "Kinyarwanda",
+    targetLanguage: "English",
+    interpretedText: "I need a moto.",
+  });
+  const harness = createPlaybackHarness({
+    requestAudio: async () => {
+      requestCount += 1;
+      return new Blob(["audio"], { type: "audio/wav" });
+    },
+  });
+
+  await harness.manager.prepare(turn);
+
+  assert.equal(requestCount, 0);
+  assert.equal(harness.manager.getState(turn.id).status, "idle");
+});
+
+test("failed background audio retries only after an explicit listen", async () => {
+  let requestCount = 0;
+  const turn = createTurn();
+  const harness = createPlaybackHarness({
+    requestAudio: async () => {
+      requestCount += 1;
+
+      if (requestCount === 1) {
+        throw new Error("Space sleeping");
+      }
+
+      return new Blob(["audio"], { type: "audio/wav" });
+    },
+  });
+
+  await harness.manager.prepare(turn);
+  await harness.manager.prepare(turn);
+
+  assert.equal(requestCount, 1);
+  assert.equal(harness.manager.getState(turn.id).status, "failed");
+  assert.equal(turn.interpretedText, "Ndashaka moto.");
+
+  await harness.manager.listen(turn);
+
+  assert.equal(requestCount, 2);
+  assert.equal(harness.manager.getState(turn.id).status, "playing");
   assert.equal(harness.audioInstances[0].playCount, 1);
 });
 

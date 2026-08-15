@@ -1,7 +1,7 @@
 export const MAX_TTS_TEXT_LENGTH = 2000;
 
 const TTS_UNAVAILABLE_MESSAGE =
-  "Voice is temporarily unavailable. You can still use the translation above.";
+  "Voice is temporarily unavailable. You can still use the translation.";
 
 function jsonError(error, status) {
   return Response.json({ error }, { status });

@@ -1,10 +1,13 @@
 export const TTS_FALLBACK_MESSAGE =
-  "Voice is temporarily unavailable. You can still use the translation above.";
+  "Voice is temporarily unavailable. You can still use the translation.";
 
 export const DEFAULT_TTS_PLAYBACK_STATE = Object.freeze({
   status: "idle",
   message: "",
+  hasPlayed: false,
 });
+
+export const TTS_PLAYBACK_ERROR_MESSAGE = "Voice unavailable.";
 
 export function isKinyarwandaTtsEligible(turn) {
   return (
@@ -42,9 +45,10 @@ export function createTtsPlaybackManager({
   onStateChange = () => {},
 }) {
   const audioByTurn = new Map();
+  const listenByTurn = new Map();
   const stateByTurn = new Map();
   const requestByTurn = new Map();
-  let activeAudio = null;
+  let activePlayback = null;
   let disposed = false;
 
   function setState(turnId, state) {
@@ -52,94 +56,191 @@ export function createTtsPlaybackManager({
       return;
     }
 
-    const nextState = { ...DEFAULT_TTS_PLAYBACK_STATE, ...state };
+    const nextState = {
+      ...DEFAULT_TTS_PLAYBACK_STATE,
+      ...stateByTurn.get(turnId),
+      ...state,
+    };
     stateByTurn.set(turnId, nextState);
     onStateChange(turnId, nextState);
   }
 
   async function play(turnId, entry) {
-    if (activeAudio && activeAudio !== entry.audio) {
-      activeAudio.pause?.();
+    if (activePlayback && activePlayback.audio !== entry.audio) {
+      activePlayback.audio.pause?.();
+
+      if (audioByTurn.has(activePlayback.turnId)) {
+        setState(activePlayback.turnId, { status: "ready", message: "" });
+      }
     }
 
-    activeAudio = entry.audio;
+    activePlayback = { turnId, audio: entry.audio };
     entry.audio.currentTime = 0;
-    setState(turnId, { status: "playing", message: "" });
+    setState(turnId, { status: "playing", message: "", hasPlayed: true });
 
     try {
       await entry.audio.play();
     } catch {
+      activePlayback = null;
       setState(turnId, {
         status: "ready",
         message: "Voice is ready. Tap Listen again to play it.",
+        hasPlayed: false,
       });
     }
+  }
+
+  function prepare(turn, { retry = false } = {}) {
+    if (disposed || !isKinyarwandaTtsEligible(turn)) {
+      return Promise.resolve(null);
+    }
+
+    const cachedAudio = audioByTurn.get(turn.id);
+
+    if (cachedAudio) {
+      return Promise.resolve(cachedAudio);
+    }
+
+    const activeRequest = requestByTurn.get(turn.id);
+
+    if (activeRequest) {
+      return activeRequest.promise;
+    }
+
+    if (stateByTurn.get(turn.id)?.status === "failed" && !retry) {
+      return Promise.resolve(null);
+    }
+
+    const requestToken = Symbol(turn.id);
+    setState(turn.id, {
+      status: "preparing",
+      message: "",
+      hasPlayed: false,
+    });
+
+    const requestPromise = Promise.resolve().then(async () => {
+      let pendingObjectUrl = null;
+
+      try {
+        const audioBlob = await requestAudio(turn.interpretedText);
+
+        if (
+          disposed ||
+          requestByTurn.get(turn.id)?.token !== requestToken
+        ) {
+          return null;
+        }
+
+        const objectUrl = createObjectUrl(audioBlob);
+        pendingObjectUrl = objectUrl;
+        const audio = createAudio(objectUrl);
+        const entry = { audio, objectUrl };
+
+        audio.addEventListener?.("ended", () => {
+          if (audioByTurn.get(turn.id) === entry) {
+            activePlayback =
+              activePlayback?.audio === audio ? null : activePlayback;
+            setState(turn.id, {
+              status: "ready",
+              message: "",
+              hasPlayed: true,
+            });
+          }
+        });
+        audio.addEventListener?.("error", () => {
+          if (audioByTurn.get(turn.id) === entry) {
+            audioByTurn.delete(turn.id);
+            revokeObjectUrl(objectUrl);
+            activePlayback =
+              activePlayback?.audio === audio ? null : activePlayback;
+            setState(turn.id, {
+              status: "failed",
+              message: TTS_PLAYBACK_ERROR_MESSAGE,
+              hasPlayed: false,
+            });
+          }
+        });
+
+        audioByTurn.set(turn.id, entry);
+        pendingObjectUrl = null;
+        setState(turn.id, {
+          status: "ready",
+          message: "",
+          hasPlayed: false,
+        });
+        return entry;
+      } catch {
+        if (pendingObjectUrl) {
+          revokeObjectUrl(pendingObjectUrl);
+        }
+
+        if (
+          !disposed &&
+          requestByTurn.get(turn.id)?.token === requestToken
+        ) {
+          setState(turn.id, {
+            status: "failed",
+            message: TTS_PLAYBACK_ERROR_MESSAGE,
+            hasPlayed: false,
+          });
+        }
+
+        return null;
+      } finally {
+        if (requestByTurn.get(turn.id)?.token === requestToken) {
+          requestByTurn.delete(turn.id);
+        }
+      }
+    });
+
+    requestByTurn.set(turn.id, {
+      token: requestToken,
+      promise: requestPromise,
+    });
+    return requestPromise;
   }
 
   return {
     getState(turnId) {
       return stateByTurn.get(turnId) ?? DEFAULT_TTS_PLAYBACK_STATE;
     },
-    async listen(turn) {
+    prepare,
+    listen(turn) {
       if (disposed || !isKinyarwandaTtsEligible(turn)) {
-        return;
+        return Promise.resolve();
       }
 
-      if (stateByTurn.get(turn.id)?.status === "loading") {
-        return;
+      if (stateByTurn.get(turn.id)?.status === "playing") {
+        return Promise.resolve();
       }
 
-      const cachedAudio = audioByTurn.get(turn.id);
+      const activeListen = listenByTurn.get(turn.id);
 
-      if (cachedAudio) {
-        await play(turn.id, cachedAudio);
-        return;
+      if (activeListen) {
+        return activeListen;
       }
 
-      const requestToken = Symbol(turn.id);
-      requestByTurn.set(turn.id, requestToken);
-      setState(turn.id, { status: "loading", message: "" });
+      const listenPromise = Promise.resolve()
+        .then(async () => {
+          const entry =
+            audioByTurn.get(turn.id) ??
+            (await prepare(turn, { retry: true }));
 
-      try {
-        const audioBlob = await requestAudio(turn.interpretedText);
-
-        if (disposed || requestByTurn.get(turn.id) !== requestToken) {
-          return;
-        }
-
-        const objectUrl = createObjectUrl(audioBlob);
-        const audio = createAudio(objectUrl);
-        const entry = { audio, objectUrl };
-
-        audio.addEventListener?.("ended", () => {
-          if (audioByTurn.get(turn.id) === entry) {
-            activeAudio = activeAudio === audio ? null : activeAudio;
-            setState(turn.id, { status: "ready", message: "" });
+          if (entry && !disposed) {
+            await play(turn.id, entry);
           }
-        });
-        audio.addEventListener?.("error", () => {
-          if (audioByTurn.get(turn.id) === entry) {
-            setState(turn.id, {
-              status: "error",
-              message: TTS_FALLBACK_MESSAGE,
-            });
+        })
+        .finally(() => {
+          if (listenByTurn.get(turn.id) === listenPromise) {
+            listenByTurn.delete(turn.id);
           }
         });
 
-        requestByTurn.delete(turn.id);
-        audioByTurn.set(turn.id, entry);
-        await play(turn.id, entry);
-      } catch {
-        if (!disposed && requestByTurn.get(turn.id) === requestToken) {
-          requestByTurn.delete(turn.id);
-          setState(turn.id, {
-            status: "error",
-            message: TTS_FALLBACK_MESSAGE,
-          });
-        }
-      }
+      listenByTurn.set(turn.id, listenPromise);
+      return listenPromise;
     },
     clearAll() {
+      listenByTurn.clear();
       requestByTurn.clear();
 
       for (const { audio, objectUrl } of audioByTurn.values()) {
@@ -149,7 +250,7 @@ export function createTtsPlaybackManager({
 
       audioByTurn.clear();
       stateByTurn.clear();
-      activeAudio = null;
+      activePlayback = null;
     },
     dispose() {
       this.clearAll();

@@ -8,7 +8,7 @@ Kasuku
 
 M7 — Kinyarwanda text-to-speech
 
-Status: M7 implementation complete as of 2026-08-14. All 42 automated tests, the production build, live Space schema inspection, live synthesis, and a live `/api/tts` smoke test pass. TTS remains optional and independent from translation.
+Status: M7 plus the requested post-M7 conversation UX improvements are implemented as of 2026-08-15 and awaiting real-browser audio verification. All 49 automated tests and the production build pass. The participant direction control now sits inside the composer, Kinyarwanda audio prepares asynchronously without automatically playing, and all synthesis uses the fixed `Male` voice at speed `0.9`.
 
 ## Completed work
 
@@ -83,10 +83,11 @@ Status: M7 implementation complete as of 2026-08-14. All 42 automated tests, the
 - Confirmed the named endpoint `/synthesize_audio` accepts `text` (string), `speaker_name` (`Female 1`, `Female 2`, or `Male`, default `Male`), and `speed` (number from 0.5 to 2.0, default `1`); it returns Audio `FileData` plus a Markdown timing string.
 - Added independent `POST /api/tts` validation and server-only Gradio integration using fixed MVP defaults `Male` and `1.0`, with a 2,000-character limit and safe timeout/failure mapping.
 - Kept provider file URLs out of the UI. The server resolves `result.data[0].url`, downloads the generated WAV, normalizes generic `application/octet-stream` to `audio/wav`, and returns only audio bytes to the browser.
-- Added a small Listen control only to interpretation bubbles whose target language is Kinyarwanda. Translation text renders first; no TTS request occurs until the user presses Listen.
-- Added independent per-turn loading, playing, ready/replay, and error states. Loading disables duplicate generation clicks without blocking typing, speaker switching, new interpretations, or existing translations.
+- Added a small voice control only to interpretation bubbles whose target language is Kinyarwanda. Translation text renders first; a post-render effect starts TTS preparation without delaying or altering the successful turn.
+- Added independent per-turn preparing, ready, playing/replay, and failed/retry states. An in-progress request can be awaited by Play without starting a duplicate generation, and audio never plays until the user explicitly presses the control.
 - Cached successful audio per turn for replay, stopped other active turn audio before playback, and revoked object URLs when starting a new conversation or unmounting.
 - Added friendly text-only fallback when generation or playback fails. No token or new environment variable is required by the currently public Space.
+- Moved the only interactive Visitor/Rwandan control into the composer, directly above the textarea. Its left side is always the active source participant, its right side is the receiver, and its names, languages, and arrow derive from the existing active-speaker state.
 
 ## Files changed
 
@@ -102,22 +103,22 @@ Status: M7 implementation complete as of 2026-08-14. All 42 automated tests, the
 - `next.config.mjs` — minimal strict-mode Next.js configuration.
 - `jsconfig.json` — JavaScript project path alias configuration.
 - `src/app/layout.js` — root App Router layout and Kasuku metadata, moved from `app/`.
-- `src/app/page.js` — existing conversation/speech UI plus Kinyarwanda-target-only per-turn Listen, preparing, replay, and fallback controls.
-- `src/app/globals.css` — existing mobile styles plus a compact message-level Listen control and non-blocking voice feedback.
+- `src/app/page.js` — conversation/speech UI with the inline participant-direction control and Kinyarwanda-only background preparation plus Play/Replay/Retry controls.
+- `src/app/globals.css` — mobile styles for the compact composer direction and message-level voice feedback.
 - `src/app/api/tts/provider.js` — official Gradio client adapter for the inspected Space endpoint, fixed voice/speed defaults, provider timeouts, FileData URL resolution, and WAV download normalization.
 - `src/app/api/tts/handler.js` — dependency-injectable `/api/tts` validation, binary response, and safe provider-error boundary.
 - `src/app/api/tts/route.js` — independent App Router `POST /api/tts` route wiring.
 - `src/app/api/translate/route.js` — validates `visitor`/`rwandan` history and defaults omitted speaker identity to Visitor.
 - `src/app/api/translate/prompt.js` — names the active speaker/listener, handles cross-direction references, and adds conservative mixed-language/borrowed-word interpretation guidance without transcript rewriting.
-- `src/lib/conversation.js` — explicit speaker identities/labels, direction derivation, other-speaker lookup, reducer, and unchanged six-turn selector.
+- `src/lib/conversation.js` — explicit speaker identities/labels, participant-direction derivation, other-speaker lookup, reducer, and unchanged six-turn selector.
 - `src/lib/speech-recognition.js` — locale and Visitor-mode definitions plus continuous recognition, indexed final/interim accumulation, transcript helpers, and disposable session lifecycle.
 - `src/hooks/use-speech-recognition.js` — client-only lifecycle adapter with per-recording locale overrides, session IDs, stale-callback guards, normal-end cleanup, cancellation, and repeated-recording support.
-- `src/hooks/use-tts-playback.js` — browser audio lifecycle adapter for on-demand generation, per-turn state, replay, and object-URL cleanup.
-- `src/lib/tts-playback.js` — Kinyarwanda eligibility, `/api/tts` browser request, and testable audio playback/cache manager.
+- `src/hooks/use-tts-playback.js` — browser audio lifecycle adapter exposing separate background preparation and explicit playback with object-URL cleanup.
+- `src/lib/tts-playback.js` — Kinyarwanda eligibility, `/api/tts` request, in-flight deduplication, per-turn caching, playback, and explicit retry manager.
 - `test/interpretation-context.test.js` — M3–M5 contracts plus raw mixed-language forwarding, adapted technical semantics, and anti-guessing coverage for the supplied phrases.
-- `test/conversation-model.test.js` — M4/M5 chronology, six-turn window, clear/failure behavior, automatic reversal, switch-back, and history-preservation tests.
+- `test/conversation-model.test.js` — chronology/history coverage plus inline participant-direction derivation and composer-placement tests.
 - `test/speech-recognition.test.js` — M6 locale/popup coverage plus continuous/interim configuration, ordered final accumulation, interim promotion, duplicate prevention, natural-pause, repeated-session, cancellation-recovery, and participant-switch recovery tests.
-- `test/tts.test.js` — M7 eligibility, discovered Gradio schema/defaults, audio success/playback, loading isolation, cached replay, cleanup, invalid input, and provider failure coverage.
+- `test/tts.test.js` — M7 provider/route coverage plus background preparation, deduplication, independent message caches, retry, replay, cleanup, and failure isolation.
 - `.env.example` — documents the required `EJOCHAT_API_KEY` variable without a real secret.
 
 ## Architectural decisions
@@ -150,6 +151,7 @@ Status: M7 implementation complete as of 2026-08-14. All 42 automated tests, the
 - Retain every successful turn in the visible page history but send only the six newest turns to EjoChat; the server independently rejects larger history payloads.
 - Append a turn only after a successful interpretation so an upstream or validation failure cannot erase or corrupt prior successful turns.
 - Treat participant identity and participant language assignments as authoritative; never store an independently mutable source/target direction that could drift from the active speaker.
+- Keep one interactive participant control inside the composer and reorder its source/receiver display from that authoritative active-speaker state.
 - Derive Visitor direction as Visitor language → Rwandan language and Rwandan direction as the exact reverse; switching back reproduces the original direction.
 - Keep speaker changes explicit through the shared-phone control; do not infer or automatically detect who is speaking.
 - Preserve context, participant languages, and all successful turns when switching speakers. Clear only the unsent draft/error during a switch so text cannot be submitted under the wrong speaker or language.
@@ -170,9 +172,10 @@ Status: M7 implementation complete as of 2026-08-14. All 42 automated tests, the
 - Permit semantic adaptation only when sentence structure, selected context, recent history, or surrounding vocabulary provides clear evidence; otherwise preserve the supplied term, name, and ambiguity.
 - Keep `/api/translate` and `/api/tts` independent. A successful interpretation appends its turn immediately; TTS state never participates in conversation success or history.
 - Use only Kinyarwanda interpretation targets for M7 eligibility. English, French, and Swahili target bubbles have no Listen control.
-- Use the live-inspected Gradio `/synthesize_audio` contract with `{ text, speaker_name: "Male", speed: 1 }`; do not expose provider identifiers, voice, speed, or file URLs to presentation code.
+- Use the live-inspected Gradio `/synthesize_audio` contract with Kasuku's fixed `{ text, speaker_name: "Male", speed: 0.9 }` MVP payload; do not expose provider identifiers, voice, speed, or file URLs to presentation code.
 - Cache generated audio only in browser memory for the active page and revoke every object URL during reset/unmount; add no audio persistence or database.
-- Allow explicit retry after failure and cached replay after success, but suppress duplicate requests while a turn is loading and never retry automatically.
+- Prepare eligible audio only after the translated turn renders, never auto-play it, and never prepare audio for an English target.
+- Allow explicit retry after failure and cached replay after success, but suppress duplicate requests while a turn is preparing and never retry automatically.
 
 ## Commands run
 
@@ -224,7 +227,7 @@ Status: M7 implementation complete as of 2026-08-14. All 42 automated tests, the
 - Installed `@gradio/client` 2.5.0 with `npm.cmd install @gradio/client`; npm reported zero vulnerabilities.
 - Connected to `Professor/c4ir-rw-kinyarwandatts` with the official client and ran `client.view_api()`; discovered `/get_random_sentence` and `/synthesize_audio`, with no unnamed endpoints.
 - Called `/synthesize_audio` live with `{ text: "Muraho", speaker_name: "Male", speed: 1 }`; the Space returned Gradio FileData for `audio.wav` plus generation timing Markdown.
-- Ran `npm.cmd test` after M7; all 42 tests passed.
+- Ran `npm.cmd test` after M7 verification; all 43 tests passed.
 - Ran `npm.cmd run build`; the optimized Next.js 16.3.0 build passed and registered dynamic `/api/translate` and `/api/tts` routes.
 - Ran a live request through Kasuku's own TTS handler with `Muraho`; it returned HTTP 200, `audio/wav`, and 38,444 audio bytes.
 
@@ -309,13 +312,52 @@ Status: M7 implementation complete as of 2026-08-14. All 42 automated tests, the
 - Production build after the interpretation prompt update: passed; `/` remains static and `/api/translate` remains dynamic.
 - Live API schema test: `/synthesize_audio` requires `text`; supports `speaker_name` values `Female 1`, `Female 2`, and `Male`; supports `speed` 0.5–2.0; and returns Audio FileData plus Markdown.
 - Kinyarwanda eligibility tests: target Kinyarwanda exposes TTS behavior; target English does not.
-- Provider mapping test: passed for the discovered endpoint and exact fixed `{ text, speaker_name: "Male", speed: 1 }` payload.
+- Provider mapping test: passed for the discovered endpoint and exact fixed `{ text, speaker_name: "Male", speed: 0.9 }` payload.
 - Non-blocking tests: translation objects remain unchanged during loading and failure; duplicate loading clicks do not create a second request.
 - Playback tests: successful audio calls `play()`, completion enables cached replay without regeneration, and cleanup revokes the object URL.
 - Validation tests: malformed JSON, empty text, and text above 2,000 characters return HTTP 400 without calling the provider.
 - Provider failure test: returns HTTP 502 with the safe voice-unavailable message and no provider details.
 - Live Kasuku TTS route smoke test: passed with HTTP 200, normalized `audio/wav`, and 38,444 bytes for `Muraho`.
-- Full automated M7 suite: 42/42 passed; production build passed with `/api/tts` dynamic and translation behavior unchanged.
+- TTS/interpretation separation test: passed; a failed audio request cannot mutate the successful turn, interpreted text, or conversation-history array.
+- Full automated M7 suite: 43/43 passed; production build passed with `/api/tts` dynamic and translation behavior unchanged.
+
+## Post-M7 inline direction and background-audio update
+
+Files changed for this update:
+
+- `src/app/page.js` — moved the participant switch into the composer, derived the displayed source/receiver order from the existing active speaker, and starts eligible TTS preparation in a post-render effect.
+- `src/app/globals.css` — removed the former top speaker-panel styles and added compact mobile-first composer-direction styling.
+- `src/lib/conversation.js` — added a pure participant-direction descriptor derived from active participant and the existing language-direction function.
+- `src/hooks/use-tts-playback.js` — exposes background preparation separately from explicit playback.
+- `src/lib/tts-playback.js` — supports preparing, ready, playing, and failed per-turn states; per-turn in-flight promise deduplication; cached playback; explicit retry; and cleanup.
+- `test/conversation-model.test.js` — covers both displayed directions, composer placement, removal of the old primary switch, and the single active-speaker state.
+- `test/tts.test.js` — covers background preparation, translation isolation while pending, request deduplication, per-message caches, Play/Replay, English-target exclusion, and retry.
+- `project-docs/AI_HANDOFF.md` — records this implementation and verification.
+
+Architecture decisions:
+
+- Keep the existing active speaker as the only participant authority. The composer control reorders the source and receiver around one arrow without storing another speaker or translation-direction state.
+- Begin Kinyarwanda TTS in a client effect only after the successful translated turn has rendered. Translation never awaits audio, and preparation never plays audio.
+- Key prepared audio, active requests, and playback state by conversation turn ID. A Play click during preparation awaits the same promise; ready audio is replayed from its cached object URL.
+- Automatic failure is terminal for that attempt. Only an explicit Retry starts another request, and English-target turns never enter the preparation path.
+- Both background preparation and manual retry use the same server provider adapter, which fixes the MVP voice to `Male` and speed to `0.9`; no UI speed setting is exposed.
+
+Tests performed:
+
+- Inline direction tests passed for Visitor → Rwandan / English → Kinyarwanda and Rwandan → Visitor / Kinyarwanda → English.
+- The prior top participant switch is absent; the only interactive participant control appears inside the composer before the textarea.
+- Existing Visitor recognition-choice, direct Rwandan `rw-RW`, and participant-switch cancellation tests remain passing.
+- Background audio starts exactly one request per eligible message, leaves interpretation/history unchanged while pending or failed, and never auto-plays.
+- Multiple Kinyarwanda turns retain independent audio objects; cached Play/Replay does not regenerate; English targets produce no request; explicit retry works after failure.
+- Provider payload regression passed for `speaker_name: "Male"` and `speed: 0.9`; background preparation and retry both reach this single server-side default.
+- `npm.cmd test`: 49/49 passed.
+- `npm.cmd run build`: passed with `/` static and `/api/translate` plus `/api/tts` dynamic.
+
+Remaining browser verification:
+
+- Confirm the compact control stays visible and easy to tap on the target phone width.
+- Confirm background Space wake-up latency, immediate cached Play, and explicit retry behavior under real network conditions.
+- Some browsers may reject playback when Play was pressed before preparation finished and user activation expires while awaiting the network. Kasuku keeps the ready audio and permits another explicit Play.
 
 ## Known issues
 

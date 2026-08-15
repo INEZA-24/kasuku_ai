@@ -16,6 +16,7 @@ import {
   conversationReducer,
   getLanguageDirection,
   getOtherSpeaker,
+  getParticipantDirection,
   selectRecentHistory,
   SPEAKER_LABELS,
 } from "../lib/conversation.js";
@@ -36,8 +37,6 @@ const contexts = [
 ];
 
 const languages = ["English", "Kinyarwanda", "French", "Swahili"];
-const speakerSides = ["visitor", "rwandan"];
-
 function MicrophoneIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" width="21" height="21">
@@ -92,6 +91,11 @@ export default function Home() {
   const listenerSide = getOtherSpeaker(activeSpeaker);
   const activeSpeakerLabel = SPEAKER_LABELS[activeSpeaker];
   const listenerLabel = SPEAKER_LABELS[listenerSide];
+  const participantDirection = getParticipantDirection(
+    activeSpeaker,
+    visitorLanguage,
+    rwandanLanguage,
+  );
   const addSpeechTranscript = useCallback((transcript) => {
     setMessage(mergeSpeechTranscript(speechDraftBaseRef.current, transcript));
   }, []);
@@ -106,7 +110,12 @@ export default function Home() {
     language: sourceLanguage,
     onTranscript: addSpeechTranscript,
   });
-  const { clearAllAudio, getPlaybackState, listenToTurn } = useTtsPlayback();
+  const {
+    clearAllAudio,
+    getPlaybackState,
+    listenToTurn,
+    prepareTurnAudio,
+  } = useTtsPlayback();
   const isSpeechActive =
     speechStatus === "listening" || speechStatus === "processing";
 
@@ -131,6 +140,14 @@ export default function Home() {
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [isSpeechChoiceOpen]);
+
+  useEffect(() => {
+    const latestTurn = turns.at(-1);
+
+    if (latestTurn) {
+      void prepareTurnAudio(latestTurn);
+    }
+  }, [prepareTurnAudio, turns]);
 
   function handleMicrophoneClick() {
     if (isSpeechActive) {
@@ -369,45 +386,6 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="speaker-panel">
-          <div className="speaker-panel-copy">
-            <p className="speaker-panel-label">Whose turn is it?</p>
-            <p>
-              <strong>{activeSpeakerLabel}</strong>, use {sourceLanguage}. Kasuku
-              will interpret into {targetLanguage} for the {listenerLabel}.
-            </p>
-          </div>
-          <div className="speaker-switch" role="group" aria-label="Active speaker">
-            {speakerSides.map((speakerSide) => {
-              const direction = getLanguageDirection(
-                speakerSide,
-                visitorLanguage,
-                rwandanLanguage,
-              );
-              const isActive = activeSpeaker === speakerSide;
-
-              return (
-                <button
-                  type="button"
-                  key={speakerSide}
-                  data-active={isActive}
-                  aria-pressed={isActive}
-                  onClick={() => changeActiveSpeaker(speakerSide)}
-                  disabled={isLoading}
-                >
-                  <span className="speaker-name">{SPEAKER_LABELS[speakerSide]}</span>
-                  <span className="speaker-direction">
-                    {direction.sourceLanguage} → {direction.targetLanguage}
-                  </span>
-                  <span className="speaker-status">
-                    {isActive ? "Current turn" : "Tap to switch"}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
         <div className="conversation-canvas" aria-live="polite" aria-busy={isLoading}>
           {turns.length ? (
             <ol className="conversation-history" aria-label="Conversation history">
@@ -417,16 +395,20 @@ export default function Home() {
                   SPEAKER_LABELS[getOtherSpeaker(turn.speakerSide)];
                 const ttsState = getPlaybackState(turn.id);
                 const canListen = isKinyarwandaTtsEligible(turn);
-                const isPreparingVoice = ttsState.status === "loading";
+                const isPreparingVoice =
+                  ttsState.status === "idle" ||
+                  ttsState.status === "preparing";
                 const listenLabel = isPreparingVoice
                   ? "Preparing voice..."
                   : ttsState.status === "playing"
                     ? "Playing..."
                     : ttsState.status === "ready"
-                      ? "Replay"
-                      : ttsState.status === "error"
-                        ? "Try voice again"
-                        : "Listen";
+                      ? ttsState.hasPlayed
+                        ? "Replay"
+                        : "Play"
+                      : ttsState.status === "failed"
+                        ? "Retry"
+                        : "Play";
 
                 return (
                   <li
@@ -454,7 +436,7 @@ export default function Home() {
                               className="listen-button"
                               type="button"
                               onClick={() => listenToTurn(turn)}
-                              disabled={isPreparingVoice}
+                              disabled={ttsState.status === "playing"}
                               aria-label={`${listenLabel} to the Kinyarwanda interpretation`}
                             >
                               <SpeakerIcon />
@@ -464,7 +446,7 @@ export default function Home() {
                               <p
                                 className="tts-message"
                                 role={
-                                  ttsState.status === "error"
+                                  ttsState.status === "failed"
                                     ? "alert"
                                     : "status"
                                 }
@@ -505,6 +487,39 @@ export default function Home() {
         </div>
 
         <form className="composer" onSubmit={submitMessage}>
+          <div
+            className="composer-direction-control"
+            role="group"
+            aria-label="Current speaker and interpretation direction"
+          >
+            <button
+              className="direction-participant"
+              type="button"
+              data-active="true"
+              aria-pressed="true"
+              onClick={() =>
+                changeActiveSpeaker(participantDirection.sourceParticipant)
+              }
+              disabled={isLoading}
+            >
+              <span>{SPEAKER_LABELS[participantDirection.sourceParticipant]}</span>
+              <small>{participantDirection.sourceLanguage}</small>
+            </button>
+            <span className="direction-arrow" aria-hidden="true">→</span>
+            <button
+              className="direction-participant"
+              type="button"
+              data-active="false"
+              aria-pressed="false"
+              onClick={() =>
+                changeActiveSpeaker(participantDirection.targetParticipant)
+              }
+              disabled={isLoading}
+            >
+              <span>{SPEAKER_LABELS[participantDirection.targetParticipant]}</span>
+              <small>{participantDirection.targetLanguage}</small>
+            </button>
+          </div>
           <label htmlFor={messageId}>
             {activeSpeakerLabel}&apos;s message in {sourceLanguage}
           </label>
