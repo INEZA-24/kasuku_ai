@@ -355,7 +355,7 @@ test("permission denial reports a short error and leaves manual text usable", ()
   harness.recognition.end();
 
   assert.equal(harness.transcripts.length, 0);
-  assert.match(harness.errors[0], /Microphone access was denied/);
+  assert.match(harness.errors[0], /Microphone access is blocked/);
   assert.equal(
     draft,
     "Typed fallback still works. I can continue typing.",
@@ -419,12 +419,39 @@ test("clearing a conversation can cancel and then reuse the microphone", () => {
 test("recognition error messages cover unavailable and rejected language paths", () => {
   assert.match(
     getSpeechRecognitionErrorMessage("language-not-supported", "Kinyarwanda"),
-    /Kinyarwanda speech recognition is not supported/,
+    /Kinyarwanda voice input isn't supported/,
   );
   assert.match(
     getSpeechRecognitionErrorMessage("network", "English"),
-    /could not connect/,
+    /lost its connection/,
   );
+  assert.match(
+    getSpeechRecognitionErrorMessage("no-speech", "English"),
+    /didn't hear anything/,
+  );
+  assert.match(
+    getSpeechRecognitionErrorMessage("audio-capture", "English"),
+    /still type/,
+  );
+});
+
+test("a genuine speech error leaves no listening state and the next session works", () => {
+  const failed = createHarness("English");
+
+  failed.session.start();
+  failed.recognition.emitError("network");
+  failed.recognition.end();
+
+  assert.equal(failed.statuses.at(-1), "error");
+  assert.match(failed.errors.at(-1), /still type/);
+
+  const recovered = createHarness("English");
+  recovered.session.start();
+  recovered.recognition.emitResult("The microphone works again.");
+  recovered.recognition.end();
+
+  assert.equal(recovered.statuses.at(-1), "idle");
+  assert.deepEqual(recovered.transcripts, ["The microphone works again."]);
 });
 
 test("transcript extraction joins recognized result segments", () => {

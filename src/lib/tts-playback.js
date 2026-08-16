@@ -8,6 +8,7 @@ export const DEFAULT_TTS_PLAYBACK_STATE = Object.freeze({
 });
 
 export const TTS_PLAYBACK_ERROR_MESSAGE = "Voice unavailable.";
+export const TTS_CLIENT_TIMEOUT_MS = 100000;
 
 export function isKinyarwandaTtsEligible(turn) {
   return (
@@ -17,11 +18,15 @@ export function isKinyarwandaTtsEligible(turn) {
   );
 }
 
-export async function requestKinyarwandaAudio(text, { fetchImpl = fetch } = {}) {
+export async function requestKinyarwandaAudio(
+  text,
+  { fetchImpl = fetch, signal } = {},
+) {
   const response = await fetchImpl("/api/tts", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
+    signal,
   });
 
   if (!response.ok) {
@@ -42,6 +47,7 @@ export function createTtsPlaybackManager({
   createAudio,
   createObjectUrl,
   revokeObjectUrl,
+  requestTimeoutMs = TTS_CLIENT_TIMEOUT_MS,
   onStateChange = () => {},
 }) {
   const audioByTurn = new Map();
@@ -112,17 +118,32 @@ export function createTtsPlaybackManager({
     }
 
     const requestToken = Symbol(turn.id);
+    const controller = new AbortController();
     setState(turn.id, {
       status: "preparing",
       message: "",
       hasPlayed: false,
     });
 
+    const abortPromise = new Promise((_, reject) => {
+      controller.signal.addEventListener(
+        "abort",
+        () => reject(new Error("The voice request stopped.")),
+        { once: true },
+      );
+    });
+    const timeoutId = setTimeout(
+      () => controller.abort("timeout"),
+      requestTimeoutMs,
+    );
     const requestPromise = Promise.resolve().then(async () => {
       let pendingObjectUrl = null;
 
       try {
-        const audioBlob = await requestAudio(turn.interpretedText);
+        const audioBlob = await Promise.race([
+          requestAudio(turn.interpretedText, { signal: controller.signal }),
+          abortPromise,
+        ]);
 
         if (
           disposed ||
@@ -187,6 +208,8 @@ export function createTtsPlaybackManager({
 
         return null;
       } finally {
+        clearTimeout(timeoutId);
+
         if (requestByTurn.get(turn.id)?.token === requestToken) {
           requestByTurn.delete(turn.id);
         }
@@ -195,6 +218,7 @@ export function createTtsPlaybackManager({
 
     requestByTurn.set(turn.id, {
       token: requestToken,
+      controller,
       promise: requestPromise,
     });
     return requestPromise;
@@ -241,6 +265,11 @@ export function createTtsPlaybackManager({
     },
     clearAll() {
       listenByTurn.clear();
+
+      for (const { controller } of requestByTurn.values()) {
+        controller.abort("cancelled");
+      }
+
       requestByTurn.clear();
 
       for (const { audio, objectUrl } of audioByTurn.values()) {

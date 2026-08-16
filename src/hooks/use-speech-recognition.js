@@ -22,7 +22,7 @@ function getAvailability(language) {
   if (typeof window === "undefined" || !getSpeechRecognitionConstructor(window)) {
     return {
       status: "unavailable",
-      message: "Voice input is not available in this browser. You can keep typing.",
+      message: "Voice input isn't available in this browser. You can still type.",
       locale,
     };
   }
@@ -79,7 +79,7 @@ export function useSpeechRecognition({ language, onTranscript }) {
     if (!RecognitionConstructor) {
       setSpeechState({
         status: "unavailable",
-        message: "Voice input is not available in this browser. You can keep typing.",
+        message: "Voice input isn't available in this browser. You can still type.",
         locale,
       });
       return;

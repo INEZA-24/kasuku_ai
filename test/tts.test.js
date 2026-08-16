@@ -7,6 +7,7 @@ import {
 } from "../src/app/api/tts/handler.js";
 import {
   synthesizeKinyarwanda,
+  TTS_PROVIDER_TIMEOUT_MS,
   TTS_DEFAULTS,
   TTS_SPACE_ID,
   TTS_SYNTHESIS_ENDPOINT,
@@ -14,6 +15,7 @@ import {
 import {
   createTtsPlaybackManager,
   isKinyarwandaTtsEligible,
+  TTS_CLIENT_TIMEOUT_MS,
   TTS_FALLBACK_MESSAGE,
   TTS_PLAYBACK_ERROR_MESSAGE,
 } from "../src/lib/tts-playback.js";
@@ -31,11 +33,12 @@ function createTurn(overrides = {}) {
 }
 
 class MockAudio {
-  constructor(url) {
+  constructor(url, { failedPlayAttempts = 0 } = {}) {
     this.url = url;
     this.currentTime = 0;
     this.playCount = 0;
     this.pauseCount = 0;
+    this.failedPlayAttempts = failedPlayAttempts;
     this.listeners = new Map();
   }
 
@@ -45,6 +48,10 @@ class MockAudio {
 
   async play() {
     this.playCount += 1;
+
+    if (this.playCount <= this.failedPlayAttempts) {
+      throw new Error("Browser playback was blocked");
+    }
   }
 
   pause() {
@@ -56,7 +63,11 @@ class MockAudio {
   }
 }
 
-function createPlaybackHarness({ requestAudio } = {}) {
+function createPlaybackHarness({
+  requestAudio,
+  requestTimeoutMs,
+  audioOptions,
+} = {}) {
   const audioInstances = [];
   const revokedUrls = [];
   const states = new Map();
@@ -65,7 +76,7 @@ function createPlaybackHarness({ requestAudio } = {}) {
     requestAudio:
       requestAudio ?? (async () => new Blob(["audio"], { type: "audio/wav" })),
     createAudio(url) {
-      const audio = new MockAudio(url);
+      const audio = new MockAudio(url, audioOptions);
       audioInstances.push(audio);
       return audio;
     },
@@ -76,6 +87,7 @@ function createPlaybackHarness({ requestAudio } = {}) {
     revokeObjectUrl(url) {
       revokedUrls.push(url);
     },
+    requestTimeoutMs,
     onStateChange(turnId, state) {
       states.set(turnId, state);
     },
@@ -145,6 +157,18 @@ test("the Gradio provider uses the discovered endpoint, schema, and defaults", a
   assert.match(fetchedUrl, /audio\.wav$/);
   assert.equal(result.audio.byteLength, 3);
   assert.equal(result.contentType, "audio/wav");
+});
+
+test("the TTS provider has one bounded overall timeout", async () => {
+  assert.equal(TTS_PROVIDER_TIMEOUT_MS, 90000);
+
+  await assert.rejects(
+    synthesizeKinyarwanda("Muraho", {
+      connect: async () => new Promise(() => {}),
+      providerTimeoutMs: 5,
+    }),
+    /timed out/i,
+  );
 });
 
 test("successful TTS becomes playable without mutating translation text", async () => {
@@ -217,6 +241,7 @@ test("completed audio replays from its cached URL without regenerating", async (
 
   harness.manager.clearAll();
   assert.deepEqual(harness.revokedUrls, ["blob:kasuku-1"]);
+  assert.equal(harness.audioInstances[0].pauseCount, 1);
 });
 
 test("preparing TTS does not alter translation and ignores duplicate requests", async () => {
@@ -364,6 +389,67 @@ test("failed background audio retries only after an explicit listen", async () =
   assert.equal(requestCount, 2);
   assert.equal(harness.manager.getState(turn.id).status, "playing");
   assert.equal(harness.audioInstances[0].playCount, 1);
+});
+
+test("a browser-side TTS timeout leaves no permanent preparing state", async () => {
+  assert.equal(TTS_CLIENT_TIMEOUT_MS, 100000);
+  const harness = createPlaybackHarness({
+    requestTimeoutMs: 5,
+    requestAudio: async () => new Promise(() => {}),
+  });
+
+  await harness.manager.prepare(createTurn());
+
+  assert.equal(harness.manager.getState("turn-1").status, "failed");
+  assert.equal(
+    harness.manager.getState("turn-1").message,
+    TTS_PLAYBACK_ERROR_MESSAGE,
+  );
+});
+
+test("clearing while TTS is pending ignores the stale result", async () => {
+  let resolveAudio;
+  const pendingAudio = new Promise((resolve) => {
+    resolveAudio = resolve;
+  });
+  const harness = createPlaybackHarness({
+    requestAudio: async () => pendingAudio,
+  });
+  const preparation = harness.manager.prepare(createTurn());
+  await Promise.resolve();
+
+  assert.equal(harness.manager.getState("turn-1").status, "preparing");
+  harness.manager.clearAll();
+  resolveAudio(new Blob(["stale audio"], { type: "audio/wav" }));
+  await preparation;
+
+  assert.equal(harness.manager.getState("turn-1").status, "idle");
+  assert.equal(harness.audioInstances.length, 0);
+  assert.deepEqual(harness.revokedUrls, []);
+});
+
+test("playback failure keeps cached audio recoverable without regeneration", async () => {
+  let requestCount = 0;
+  const harness = createPlaybackHarness({
+    audioOptions: { failedPlayAttempts: 1 },
+    requestAudio: async () => {
+      requestCount += 1;
+      return new Blob(["audio"], { type: "audio/wav" });
+    },
+  });
+  const turn = createTurn();
+
+  await harness.manager.listen(turn);
+
+  assert.equal(harness.manager.getState(turn.id).status, "ready");
+  assert.match(harness.manager.getState(turn.id).message, /Tap Listen again/);
+  assert.equal(requestCount, 1);
+
+  await harness.manager.listen(turn);
+
+  assert.equal(harness.manager.getState(turn.id).status, "playing");
+  assert.equal(requestCount, 1);
+  assert.equal(harness.audioInstances[0].playCount, 2);
 });
 
 test("/api/tts rejects malformed, empty, and oversized input", async () => {

@@ -770,6 +770,35 @@ textarea:disabled {
   line-height: 1.45;
 }
 
+.translation-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 12px;
+}
+
+.translation-error .error-message {
+  flex: 1 1 240px;
+  margin: 0;
+}
+
+.translation-error button {
+  padding: 7px 10px;
+  border: 1px solid #d7a4a4;
+  border-radius: 999px;
+  background: var(--surface);
+  color: #8a2929;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.translation-error button:hover,
+.translation-error button:focus-visible {
+  border-color: #b86161;
+  background: #fff7f7;
+}
+
 .send-button {
   display: inline-flex;
   min-height: 46px;

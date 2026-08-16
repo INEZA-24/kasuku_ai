@@ -7,8 +7,8 @@ export const TTS_DEFAULTS = Object.freeze({
   speed: 0.9,
 });
 
-const PROVIDER_TIMEOUT_MS = 90000;
-const AUDIO_FETCH_TIMEOUT_MS = 30000;
+export const TTS_PROVIDER_TIMEOUT_MS = 90000;
+export const TTS_AUDIO_FETCH_TIMEOUT_MS = 30000;
 
 let sharedClientPromise = null;
 
@@ -65,40 +65,49 @@ export async function synthesizeKinyarwanda(
   {
     connect = connectToPublicSpace,
     fetchImpl = fetch,
-    providerTimeoutMs = PROVIDER_TIMEOUT_MS,
+    providerTimeoutMs = TTS_PROVIDER_TIMEOUT_MS,
   } = {},
 ) {
-  const client = await withTimeout(connect(TTS_SPACE_ID), providerTimeoutMs);
-  const result = await withTimeout(
-    client.predict(TTS_SYNTHESIS_ENDPOINT, {
+  const synthesis = (async () => {
+    const client = await connect(TTS_SPACE_ID);
+    const result = await client.predict(TTS_SYNTHESIS_ENDPOINT, {
       text,
       speaker_name: TTS_DEFAULTS.speakerName,
       speed: TTS_DEFAULTS.speed,
-    }),
-    providerTimeoutMs,
-  );
-  const audioUrl = getGradioAudioUrl(result);
-  const audioResponse = await fetchImpl(audioUrl, {
-    cache: "no-store",
-    signal: AbortSignal.timeout(AUDIO_FETCH_TIMEOUT_MS),
-  });
+    });
+    const audioUrl = getGradioAudioUrl(result);
+    const audioResponse = await fetchImpl(audioUrl, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(TTS_AUDIO_FETCH_TIMEOUT_MS),
+    });
 
-  if (!audioResponse.ok) {
-    throw new Error("The generated audio could not be downloaded.");
+    if (!audioResponse.ok) {
+      throw new Error("The generated audio could not be downloaded.");
+    }
+
+    const audio = await audioResponse.arrayBuffer();
+
+    if (!audio.byteLength) {
+      throw new Error("The TTS provider returned empty audio.");
+    }
+
+    const upstreamContentType = audioResponse.headers.get("content-type");
+
+    return {
+      audio,
+      contentType: upstreamContentType?.startsWith("audio/")
+        ? upstreamContentType
+        : "audio/wav",
+    };
+  })();
+
+  try {
+    return await withTimeout(synthesis, providerTimeoutMs);
+  } catch (error) {
+    if (error?.message === "The TTS provider timed out.") {
+      sharedClientPromise = null;
+    }
+
+    throw error;
   }
-
-  const audio = await audioResponse.arrayBuffer();
-
-  if (!audio.byteLength) {
-    throw new Error("The TTS provider returned empty audio.");
-  }
-
-  const upstreamContentType = audioResponse.headers.get("content-type");
-
-  return {
-    audio,
-    contentType: upstreamContentType?.startsWith("audio/")
-      ? upstreamContentType
-      : "audio/wav",
-  };
 }

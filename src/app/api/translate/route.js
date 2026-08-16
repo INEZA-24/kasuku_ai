@@ -7,7 +7,8 @@ import {
   SPEAKER_SIDES,
 } from "../../../lib/conversation.js";
 
-const EJOCHAT_URL = "https://api.ejolabs.com/api/v1/subiza";
+export const EJOCHAT_URL = "https://api.ejolabs.com/api/v1/subiza";
+export const TRANSLATION_TIMEOUT_MS = 30000;
 
 const ALLOWED_LANGUAGES = new Set([
   "English",
@@ -120,82 +121,108 @@ function validateRequestBody(body) {
   return null;
 }
 
-export async function POST(request) {
-  let body;
+export function createTranslatePostHandler({
+  fetchImpl,
+  getApiKey,
+  timeoutMs = TRANSLATION_TIMEOUT_MS,
+  createTimeoutSignal,
+} = {}) {
+  return async function handleTranslatePost(request) {
+    let body;
 
-  try {
-    body = await request.json();
-  } catch {
-    return errorResponse("Send a valid JSON request.", 400);
-  }
+    try {
+      body = await request.json();
+    } catch {
+      return errorResponse("Send a valid JSON request.", 400);
+    }
 
-  const validationError = validateRequestBody(body);
+    const validationError = validateRequestBody(body);
 
-  if (validationError) {
-    return errorResponse(validationError, 400);
-  }
+    if (validationError) {
+      return errorResponse(validationError, 400);
+    }
 
-  const apiKey = process.env.EJOCHAT_API_KEY;
+    const apiKey = getApiKey?.() ?? process.env.EJOCHAT_API_KEY;
 
-  if (!apiKey) {
-    return errorResponse(
-      "Interpretation is not configured. Please contact the site administrator.",
-      503,
-    );
-  }
+    if (!apiKey) {
+      return errorResponse(
+        "Interpretation is not configured. Please contact the site administrator.",
+        503,
+      );
+    }
 
-  let upstreamResponse;
+    const timeoutSignal = createTimeoutSignal
+      ? createTimeoutSignal(timeoutMs)
+      : AbortSignal.timeout(timeoutMs);
+    let upstreamResponse;
 
-  try {
-    upstreamResponse = await fetch(EJOCHAT_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": apiKey,
-      },
-      body: JSON.stringify({
-        messages: createInterpretationMessages({
-          ...body,
-          history: body.history ?? [],
-          speakerSide: body.speakerSide ?? "visitor",
+    try {
+      upstreamResponse = await (fetchImpl ?? fetch)(EJOCHAT_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": apiKey,
+        },
+        body: JSON.stringify({
+          messages: createInterpretationMessages({
+            ...body,
+            history: body.history ?? [],
+            speakerSide: body.speakerSide ?? "visitor",
+          }),
         }),
-      }),
-      cache: "no-store",
-      signal: AbortSignal.timeout(30000),
-    });
-  } catch {
-    return errorResponse(
-      "The interpretation service could not be reached. Please try again.",
-      502,
-    );
-  }
+        cache: "no-store",
+        signal: timeoutSignal,
+      });
+    } catch (error) {
+      if (timeoutSignal.aborted || error?.name === "TimeoutError") {
+        return errorResponse(
+          "Interpretation took too long. Please try again.",
+          504,
+        );
+      }
 
-  if (!upstreamResponse.ok) {
-    return errorResponse(
-      "The interpretation service is temporarily unavailable. Please try again.",
-      502,
-    );
-  }
+      return errorResponse(
+        "The interpretation service could not be reached. Please try again.",
+        502,
+      );
+    }
 
-  let upstreamData;
+    if (upstreamResponse.status === 429) {
+      return errorResponse(
+        "Interpretation is busy right now. Please try again shortly.",
+        429,
+      );
+    }
 
-  try {
-    upstreamData = await upstreamResponse.json();
-  } catch {
-    return errorResponse(
-      "The interpretation service returned an invalid response. Please try again.",
-      502,
-    );
-  }
+    if (!upstreamResponse.ok) {
+      return errorResponse(
+        "The interpretation service is temporarily unavailable. Please try again.",
+        502,
+      );
+    }
 
-  const interpretation = upstreamData?.choices?.[0]?.message?.content;
+    let upstreamData;
 
-  if (typeof interpretation !== "string" || !interpretation.trim()) {
-    return errorResponse(
-      "The interpretation service returned an invalid response. Please try again.",
-      502,
-    );
-  }
+    try {
+      upstreamData = await upstreamResponse.json();
+    } catch {
+      return errorResponse(
+        "The interpretation service returned an invalid response. Please try again.",
+        502,
+      );
+    }
 
-  return Response.json({ interpretation: interpretation.trim() });
+    const interpretation = upstreamData?.choices?.[0]?.message?.content;
+
+    if (typeof interpretation !== "string" || !interpretation.trim()) {
+      return errorResponse(
+        "The interpretation service returned an invalid response. Please try again.",
+        502,
+      );
+    }
+
+    return Response.json({ interpretation: interpretation.trim() });
+  };
 }
+
+export const POST = createTranslatePostHandler();

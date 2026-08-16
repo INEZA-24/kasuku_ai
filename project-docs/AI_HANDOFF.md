@@ -6,9 +6,9 @@ Kasuku
 
 ## Current milestone
 
-M7 — Kinyarwanda text-to-speech
+M8 — Error handling and resilience
 
-Status: M7 plus the requested post-M7 conversation UX improvements are implemented as of 2026-08-15 and awaiting real-browser audio verification. All 49 automated tests and the production build pass. The participant direction control now sits inside the composer, Kinyarwanda audio prepares asynchronously without automatically playing, and all synthesis uses the fixed `Male` voice at speed `0.9`.
+Status: M8 is implemented as of 2026-08-15 and awaiting real-browser resilience verification. All 62 automated tests and the production build pass. Translation, microphone, TTS, playback, timeout, offline, duplicate-request, stale-response, and clear-session failures now terminate in recoverable feature-local states without changing the M3–M7 interpretation, history, STT, direction, or provider behavior.
 
 ## Completed work
 
@@ -359,6 +359,47 @@ Remaining browser verification:
 - Confirm background Space wake-up latency, immediate cached Play, and explicit retry behavior under real network conditions.
 - Some browsers may reject playback when Play was pressed before preparation finished and user activation expires while awaiting the network. Kasuku keeps the ready audio and permits another explicit Play.
 
+## M8 error handling and resilience
+
+Files changed:
+
+- `src/lib/interpretation-request.js` — immutable submission snapshots, safe browser request normalization, active-request deduplication, retry ownership, client timeout, and conversation-session invalidation.
+- `src/hooks/use-interpretation.js` — client lifecycle adapter for local loading/error/retry state and unmount cancellation.
+- `src/app/page.js` — preserves failed drafts/history, renders local translation retry UI, permits participant switching and clear during translation, and clears all feature state on New Conversation.
+- `src/app/api/translate/route.js` — dependency-injectable handler, existing 30-second upstream timeout made explicit, timeout/rate-limit/malformed-response handling, and safe responses without provider details.
+- `src/lib/speech-recognition.js` and `src/hooks/use-speech-recognition.js` — concise permission, unsupported, capture, no-speech, network, and unexpected-stop messages plus explicit terminal error state.
+- `src/app/api/tts/provider.js` — one 90-second overall Space synthesis bound while retaining the 30-second generated-audio download bound, `Male`, and speed `0.9`.
+- `src/lib/tts-playback.js` — abortable per-message browser requests, a 100-second terminal timeout, clear-session invalidation, and recoverable playback failure.
+- `src/app/globals.css` — compact composer-local translation error and Retry treatment.
+- `test/resilience.test.js`, `test/speech-recognition.test.js`, and `test/tts.test.js` — failure injection and race regression coverage.
+- `project-docs/AI_HANDOFF.md` — M8 design, verification, limitations, and M9 handoff.
+
+Architecture and resilience decisions:
+
+- Capture message, participant, direction, context, and the six-turn history snapshot before every translation request. Retries reuse that immutable snapshot, so later UI changes cannot alter request ownership.
+- Permit only one active interpretation. Repeated submit events share the active promise and can create at most one successful turn.
+- Associate each translation request with a conversation-session identity and AbortController. New Conversation invalidates the session before clearing history, so a late response cannot repopulate it.
+- Preserve typed input until a successful interpretation. Provider, malformed-response, timeout, and offline failures add no turn, preserve existing history, clear loading, and expose Retry.
+- Treat a browser fetch rejection as connectivity-related and show `Connection unavailable. Check your internet and try again.`; all other client interpretation failures use `Kasuku couldn't interpret that message. Please try again.` Raw server/provider details are ignored.
+- Keep microphone failure isolated from the composer. Genuine errors transition to `error`, late end events cannot restore a stale listening state, and starting another recording disposes the failed session first.
+- Keep TTS keyed by stable turn ID. Each pending request has its own controller/token; Clear Conversation aborts and invalidates all of them before cached object URLs are paused and revoked.
+- Keep generated audio after a browser `play()` rejection. The turn returns to a ready state with a small playback message, and another explicit Play reuses the cached audio rather than regenerating or retranslating.
+- Timeout policy: EjoChat server request 30 seconds; client interpretation terminal bound 35 seconds; whole Hugging Face synthesis operation 90 seconds; generated-audio download 30 seconds within that overall operation; browser `/api/tts` terminal bound 100 seconds.
+
+Tests performed:
+
+- Translation: offline fetch, provider failure, malformed response, rate limit, server timeout, client timeout, retry snapshot equality, duplicate submission, original direction after participant switch, and stale response after clear.
+- State preservation: failed drafts and successful history remain unchanged; no failed request becomes a turn; every failure clears `Interpreting` and remains retryable without refresh.
+- Speech: permission, unsupported locale/browser paths, no-speech, capture, network, terminal error, cancel, participant switch, clear, and successful second recording after error.
+- TTS/audio: provider overall timeout, browser timeout, provider failure, per-message retry, duplicate preparation suppression, independent message ownership, pending-clear invalidation, playback rejection recovery, cached replay, pause, and object-URL revocation.
+- Full automated suite: 62/62 passed.
+- Production build: passed with `/` static and `/api/translate` plus `/api/tts` dynamic.
+
+Remaining M8 verification:
+
+- Real Chrome/mobile permission, offline, throttled-network, Space wake-up, playback-policy, and rapid interaction testing is still required because automated tests use controlled browser/provider doubles.
+- Browser vendors can terminate continuous speech recognition independently; Kasuku now returns to an idle/error state and permits a new session but does not auto-restart recognition.
+
 ## Known issues
 
 - The PowerShell execution policy blocks `npm.ps1`; use `npm.cmd` for npm commands on this machine.
@@ -391,4 +432,4 @@ Remaining browser verification:
 
 ## Exact next step
 
-M8 Error handling and resilience
+M9 Responsive UI polish

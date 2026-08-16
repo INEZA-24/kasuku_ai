@@ -46,17 +46,17 @@ export function getSpeechRecognitionErrorMessage(errorCode, language) {
   switch (errorCode) {
     case "not-allowed":
     case "service-not-allowed":
-      return "Microphone access was denied. You can keep typing your message.";
+      return "Microphone access is blocked. You can still type your message.";
     case "audio-capture":
-      return "No working microphone was found. You can keep typing your message.";
+      return "No working microphone was found. You can still type your message.";
     case "no-speech":
-      return "No speech was heard. Try again or type your message.";
+      return "We didn't hear anything. Try again or type your message.";
     case "network":
-      return "Speech recognition could not connect. You can keep typing your message.";
+      return "Voice recognition lost its connection. You can still type your message.";
     case "language-not-supported":
-      return `${language} speech recognition is not supported by this browser. You can keep typing.`;
+      return `${language} voice input isn't supported by this browser. You can still type.`;
     default:
-      return "Speech recognition stopped unexpectedly. You can keep typing your message.";
+      return "Voice input stopped unexpectedly. Try again or type your message.";
   }
 }
 
@@ -220,6 +220,8 @@ export function createSpeechRecognitionSession({
     }
 
     failed = true;
+    ended = true;
+    onStatusChange("error");
     onError(getSpeechRecognitionErrorMessage(event?.error, language));
   };
 

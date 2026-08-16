@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 
+import { useInterpretation } from "../hooks/use-interpretation.js";
 import { useSpeechRecognition } from "../hooks/use-speech-recognition.js";
 import { useTtsPlayback } from "../hooks/use-tts-playback.js";
 
@@ -20,6 +21,9 @@ import {
   selectRecentHistory,
   SPEAKER_LABELS,
 } from "../lib/conversation.js";
+import {
+  createInterpretationSnapshot,
+} from "../lib/interpretation-request.js";
 import {
   getVisitorSpeechRecognitionLanguage,
   mergeSpeechTranscript,
@@ -80,8 +84,7 @@ export default function Home() {
   const [activeSpeaker, setActiveSpeaker] = useState("visitor");
   const [message, setMessage] = useState("");
   const [turns, dispatchConversation] = useReducer(conversationReducer, []);
-  const [error, setError] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [inputError, setInputError] = useState("");
   const [isSpeechChoiceOpen, setIsSpeechChoiceOpen] = useState(false);
   const { sourceLanguage, targetLanguage } = getLanguageDirection(
     activeSpeaker,
@@ -99,6 +102,20 @@ export default function Home() {
   const addSpeechTranscript = useCallback((transcript) => {
     setMessage(mergeSpeechTranscript(speechDraftBaseRef.current, transcript));
   }, []);
+  const handleInterpretationSuccess = useCallback((turn, snapshot) => {
+    dispatchConversation({ type: "add", turn });
+    setMessage((currentMessage) =>
+      currentMessage.trim() === snapshot.message ? "" : currentMessage,
+    );
+  }, []);
+  const {
+    status: interpretationStatus,
+    error: interpretationError,
+    canRetry: canRetryInterpretation,
+    submitInterpretation,
+    retryInterpretation,
+    clearInterpretation,
+  } = useInterpretation({ onSuccess: handleInterpretationSuccess });
   const {
     status: speechStatus,
     message: speechMessage,
@@ -118,6 +135,7 @@ export default function Home() {
   } = useTtsPlayback();
   const isSpeechActive =
     speechStatus === "listening" || speechStatus === "processing";
+  const isLoading = interpretationStatus === "loading";
 
   function beginSpeechRecognition(recognitionLanguage) {
     speechDraftBaseRef.current = message;
@@ -194,83 +212,51 @@ export default function Home() {
     cancelListening();
     setActiveSpeaker(speakerSide);
     setMessage("");
-    setError("");
+    setInputError("");
   }
 
   function startNewConversation() {
     setIsSpeechChoiceOpen(false);
     cancelListening();
+    clearInterpretation();
     clearAllAudio();
     dispatchConversation({ type: "clear" });
     setActiveSpeaker("visitor");
     setMessage("");
-    setError("");
+    setInputError("");
     clearSpeechMessage();
   }
 
-  async function submitMessage(event) {
+  function submitMessage(event) {
     event.preventDefault();
+
+    if (isLoading) {
+      return;
+    }
 
     const trimmedMessage = message.trim();
 
     if (!trimmedMessage) {
-      setError("Enter a message to interpret.");
+      setInputError("Enter a message to interpret.");
       return;
     }
 
     if (sourceLanguage === targetLanguage) {
-      setError("Choose two different languages.");
+      setInputError("Choose two different languages.");
       return;
     }
 
-    setIsLoading(true);
-    setError("");
+    const snapshot = createInterpretationSnapshot({
+      message: trimmedMessage,
+      sourceLanguage,
+      targetLanguage,
+      context,
+      speakerSide: activeSpeaker,
+      history: selectRecentHistory(turns),
+    });
 
-    try {
-      const response = await fetch("/api/translate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: trimmedMessage,
-          sourceLanguage,
-          targetLanguage,
-          context,
-          speakerSide: activeSpeaker,
-          history: selectRecentHistory(turns),
-        }),
-      });
-
-      const data = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(data?.error || "Interpretation failed. Please try again.");
-      }
-
-      if (typeof data?.interpretation !== "string") {
-        throw new Error("Interpretation failed. Please try again.");
-      }
-
-      dispatchConversation({
-        type: "add",
-        turn: {
-          id: globalThis.crypto.randomUUID(),
-          speakerSide: activeSpeaker,
-          originalText: trimmedMessage,
-          interpretedText: data.interpretation.trim(),
-          sourceLanguage,
-          targetLanguage,
-        },
-      });
-      setMessage("");
-    } catch (requestError) {
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : "Interpretation failed. Please try again.",
-      );
-    } finally {
-      setIsLoading(false);
-    }
+    setInputError("");
+    void submitInterpretation(snapshot);
   }
 
   return (
@@ -379,7 +365,6 @@ export default function Home() {
               className="clear-button"
               type="button"
               onClick={startNewConversation}
-              disabled={!turns.length || isLoading}
             >
               New conversation
             </button>
@@ -500,7 +485,6 @@ export default function Home() {
               onClick={() =>
                 changeActiveSpeaker(participantDirection.sourceParticipant)
               }
-              disabled={isLoading}
             >
               <span>{SPEAKER_LABELS[participantDirection.sourceParticipant]}</span>
               <small>{participantDirection.sourceLanguage}</small>
@@ -514,7 +498,6 @@ export default function Home() {
               onClick={() =>
                 changeActiveSpeaker(participantDirection.targetParticipant)
               }
-              disabled={isLoading}
             >
               <span>{SPEAKER_LABELS[participantDirection.targetParticipant]}</span>
               <small>{participantDirection.targetLanguage}</small>
@@ -530,6 +513,7 @@ export default function Home() {
               value={message}
               onChange={(event) => {
                 setMessage(event.target.value);
+                setInputError("");
 
                 if (speechStatus === "error") {
                   clearSpeechMessage();
@@ -587,7 +571,21 @@ export default function Home() {
               Configured voice locale for {activeSpeakerLabel}: {speechLocale}
             </p>
           ) : null}
-          {error ? <p className="error-message" role="alert">{error}</p> : null}
+          {inputError || interpretationError ? (
+            <div className="translation-error" role="alert">
+              <p className="error-message">
+                {inputError || interpretationError}
+              </p>
+              {canRetryInterpretation && !isLoading && !inputError ? (
+                <button
+                  type="button"
+                  onClick={() => void retryInterpretation()}
+                >
+                  Retry interpretation
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           <div className="composer-footer">
             <p>
               {sourceLanguage} → {targetLanguage} for the {listenerLabel}
