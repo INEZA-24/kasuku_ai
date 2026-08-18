@@ -9,6 +9,7 @@ export const DEFAULT_TTS_PLAYBACK_STATE = Object.freeze({
 
 export const TTS_PLAYBACK_ERROR_MESSAGE = "Voice unavailable.";
 export const TTS_CLIENT_TIMEOUT_MS = 100000;
+export const TTS_PLAYBACK_RATE = 0.9;
 
 export function isKinyarwandaTtsEligible(turn) {
   return (
@@ -82,6 +83,7 @@ export function createTtsPlaybackManager({
 
     activePlayback = { turnId, audio: entry.audio };
     entry.audio.currentTime = 0;
+    entry.audio.playbackRate = TTS_PLAYBACK_RATE;
     setState(turnId, { status: "playing", message: "", hasPlayed: true });
 
     try {

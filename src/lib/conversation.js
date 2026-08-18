@@ -6,8 +6,8 @@ export const SPEAKER_SIDES = Object.freeze([
 ]);
 
 export const SPEAKER_LABELS = Object.freeze({
-  visitor: "Visitor",
-  rwandan: "Rwandan",
+  visitor: "Speaker 1",
+  rwandan: "Speaker 2",
 });
 
 export function conversationReducer(turns, action) {

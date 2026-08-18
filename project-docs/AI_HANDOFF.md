@@ -400,6 +400,53 @@ Remaining M8 verification:
 - Real Chrome/mobile permission, offline, throttled-network, Space wake-up, playback-policy, and rapid interaction testing is still required because automated tests use controlled browser/provider doubles.
 - Browser vendors can terminate continuous speech recognition independently; Kasuku now returns to an idle/error state and permits a new session but does not auto-restart recognition.
 
+## M9 complete product UI/UX polish
+
+Status: M9 complete pending final browser visual confirmation.
+
+Files changed or created for M9:
+
+- `src/app/page.js` and `src/app/landing.module.css` — public Rwanda-business landing page with concise hero, official business indicators, local communication scenarios, three-step explanation, visual product preview, and `/conversation` calls to action.
+- `src/app/conversation/page.js` and `src/app/conversation/layout.js` — preserved interpreter moved to its dedicated route, branded conversation header, neutral participant copy, central vector direction swap, compact composer, and route metadata.
+- `src/components/onboarding-tour.js` and `src/lib/onboarding.js` — four-step first-use coach-mark tour, completion storage, keyboard dismissal, responsive focus positioning, and manual restart.
+- `src/app/globals.css` — final warm cream/deep-teal conversation styling, moderately sharp cards and controls, mobile conversation viewport, sticky composer treatment, tour presentation, focus visibility, and reduced-motion handling.
+- `src/app/layout.js` — final public product title and Rwanda-focused description.
+- `src/lib/conversation.js` — presentation labels changed from Visitor/Rwandan to Speaker 1/Speaker 2 while the stable internal participant keys and direction logic remain unchanged.
+- `src/lib/speech-recognition.js` — recognition-mode helper copy now refers to Kinyarwanda names and local vocabulary; its `en-US` and `rw-RW` behavior is unchanged.
+- `test/conversation-model.test.js`, `test/speech-recognition.test.js`, `test/onboarding.test.js`, and `test/product-ui.test.js` — route, brand, terminology, direction, microphone, onboarding, and landing-story regression coverage.
+- `project-docs/AI_HANDOFF.md` — this M9 handoff.
+
+Design and information-architecture decisions:
+
+- `/` is a static customer-facing landing page; `/conversation` owns the single working interpreter. No interpreter state or API behavior is duplicated on the landing page.
+- The landing story presents Kasuku as a Rwanda-focused shared-device interpreter for business and everyday professional interactions. It uses the supplied 2025 figures with discreet Rwanda Development Board and National Institute of Statistics of Rwanda attribution.
+- `public/kasuku.png` is used for navigation, hero, product preview, and conversation branding. `src/app/icon.png` remains the Next.js app icon; the former letter-K mark was removed.
+- The UI renders Speaker 1 and Speaker 2, while the existing internal `visitor` and `rwandan` identifiers remain untouched to protect M4–M8 request ownership, history, STT, and race behavior.
+- The composer derives both displayed sides and languages from the existing `activeSpeaker` state. One central SVG swap button calls the existing participant-change path, so it continues to cancel an active recognizer safely and reverse English/Kinyarwanda without introducing direction state.
+- Conversation history scrolls inside a bounded conversation surface and the composer stays close to it with a mobile safe-area-aware sticky position. This keeps direction, text, microphone, and Interpret controls together as history grows.
+- On first visit, `kasuku-onboarding-complete` controls a four-step coach-mark tour for context, direction, composer, and interpretation/voice. Skip, Escape, and completion store dismissal; `? How to use Kasuku` always restarts the tour.
+- Responsive styles explicitly cover narrow 320–430px layouts: compact navigation, stacked statistics, two-column context choices, single-column language controls, readable message widths, an uncompressed swap control, viewport-bounded coach marks, and no page-level horizontal overflow.
+- M0–M8 interpretation, six-turn history, recognition locales and accumulation, microphone choice, TTS provider/voice/speed, background per-message caching, timeouts, retry behavior, and stale-response protections were not changed.
+
+Final M9 cleanup:
+
+- Removed numbered labels from the landing workflow and scenario content, and removed the remaining 01/02/03 setup labels from the interpreter. Landing section headings now use one consistent short teal-line accent.
+- Removed the `/conversation` marketing hero, including `One phone. One clear conversation.`, so the context and interpreter controls appear immediately below the compact product header.
+- Kept final Speaker 1/Speaker 2 presentation terminology and the existing internal participant identities and direction logic.
+- Preserved the central swap-style SVG direction control and standard microphone SVG without altering either interaction path.
+- Confirmed the active cards, buttons, composer, input, message, dialog, and product-preview surfaces use the approved approximately 8–14px corner treatment; circular icon/status controls remain intentionally circular.
+- Kept `public/kasuku.png` as the product mark and `src/app/icon.png` as the app icon without modifying either asset.
+- Replaced the landing footer with the single line: `© 2026 Kasuku. Built by Team NEXEL.`
+- Preserved first-visit onboarding, localStorage completion, Skip/Next/Start talking, Escape dismissal, and the `How to use Kasuku` restart control.
+- Removed sticky positioning from the composer after rendered-browser measurements showed it could overlap the bounded message canvas. The canvas retains its own scrolling and the composer now remains directly below it without covering messages.
+
+Verification performed:
+
+- `npm.cmd test`: 77/77 passed, including all existing interpretation, history, speech, TTS, and M8 resilience tests plus final M9 cleanup assertions.
+- `npm.cmd run build`: passed with static `/`, static `/conversation`, static `/icon.png`, and unchanged dynamic `/api/translate` and `/api/tts` routes.
+- Headless Chrome rendered `/` and `/conversation` at 320px, 375px, 390px, 430px, and 1440px. Every viewport reported zero horizontal overflow, controls inside the viewport width, no Next.js error overlay, no numbered labels or removed hero copy, exact footer text, and no composer/message-canvas overlap.
+- The onboarding card was reopened and measured at all four mobile widths; it remained fully inside each viewport. Final human real-device visual confirmation remains pending.
+
 ## Known issues
 
 - The PowerShell execution policy blocks `npm.ps1`; use `npm.cmd` for npm commands on this machine.
@@ -407,7 +454,7 @@ Remaining M8 verification:
 - AI naturalness requires human multilingual evaluation in later milestones; it cannot be guaranteed by documentation alone.
 - Live M3 evaluation currently covers only English-to-Kinyarwanda. French, Swahili, reverse directions, and broader human multilingual review remain unverified.
 - Ejo Labs' public pages did not expose the upstream request-body schema. The current endpoint accepted M3's OpenAI-style `system` and `user` messages and returned the documented `choices[0].message.content` shape in five live checks, but quotas and formal contract guarantees remain undocumented.
-- Browser visual/interaction verification was not completed because the cataloged `agent-browser` CLI is not installed in this environment; the layout compiled successfully and model/API behavior is covered by automated tests.
+- The cataloged `agent-browser` CLI is not installed in this environment. M9 final cleanup used the installed headless Chrome through the DevTools protocol as a fallback for rendered viewport, overflow, control-boundary, onboarding-boundary, and error-overlay checks.
 - The M5 live priority flow covers Transport and English ↔ Kinyarwanda only. Other supported contexts and language pairs remain available but were not live-tested during M5.
 - The final Kinyarwanda follow-up naturally omits English reporting language and explicit pronouns; broader bilingual human review is still recommended for nuanced reference resolution.
 - Real English microphone capture and recognition accuracy were not testable because this environment lacks interactive browser automation and a controllable microphone input. The browser adapter and transcript-to-draft path are verified with mocks.
@@ -432,4 +479,4 @@ Remaining M8 verification:
 
 ## Exact next step
 
-M9 Responsive UI polish
+Complete M9 real-browser visual and accessibility review at the target viewport widths before planning any M10 work.

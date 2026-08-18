@@ -137,7 +137,7 @@ test("the inline participant direction is derived from the active speaker", () =
 
 test("the only interactive participant switch is inside the composer", () => {
   const pageSource = readFileSync(
-    new URL("../src/app/page.js", import.meta.url),
+    new URL("../src/app/conversation/page.js", import.meta.url),
     "utf8",
   );
   const composerStart = pageSource.indexOf('<form className="composer"');
@@ -151,6 +151,8 @@ test("the only interactive participant switch is inside the composer", () => {
   assert.ok(textarea > directionControl);
   assert.equal(pageSource.includes('className="speaker-panel"'), false);
   assert.equal(pageSource.includes('className="speaker-switch"'), false);
+  assert.ok(pageSource.includes('className="direction-swap-button"'));
+  assert.ok(pageSource.includes("swapActiveSpeaker"));
   assert.equal(
     pageSource.match(/const \[activeSpeaker, setActiveSpeaker\] = useState/g)
       ?.length,

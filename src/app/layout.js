@@ -1,8 +1,12 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Kasuku | Contextual Interpreter",
-  description: "AI-powered contextual interpreter for everyday conversations.",
+  title: {
+    default: "Kasuku | Rwanda-focused contextual interpreter",
+    template: "%s | Kasuku",
+  },
+  description:
+    "Kasuku helps two people communicate naturally across English and Kinyarwanda on one shared phone.",
 };
 
 export default function RootLayout({ children }) {

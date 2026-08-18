@@ -18,6 +18,7 @@ import {
   TTS_CLIENT_TIMEOUT_MS,
   TTS_FALLBACK_MESSAGE,
   TTS_PLAYBACK_ERROR_MESSAGE,
+  TTS_PLAYBACK_RATE,
 } from "../src/lib/tts-playback.js";
 
 function createTurn(overrides = {}) {
@@ -36,6 +37,7 @@ class MockAudio {
   constructor(url, { failedPlayAttempts = 0 } = {}) {
     this.url = url;
     this.currentTime = 0;
+    this.playbackRate = 1;
     this.playCount = 0;
     this.pauseCount = 0;
     this.failedPlayAttempts = failedPlayAttempts;
@@ -180,6 +182,8 @@ test("successful TTS becomes playable without mutating translation text", async 
 
   assert.deepEqual(turn, originalTurn);
   assert.equal(harness.audioInstances.length, 1);
+  assert.equal(TTS_PLAYBACK_RATE, 0.9);
+  assert.equal(harness.audioInstances[0].playbackRate, 0.9);
   assert.equal(harness.audioInstances[0].playCount, 1);
   assert.equal(harness.manager.getState(turn.id).status, "playing");
 });
@@ -237,6 +241,7 @@ test("completed audio replays from its cached URL without regenerating", async (
 
   assert.equal(requestCount, 1);
   assert.equal(harness.audioInstances.length, 1);
+  assert.equal(harness.audioInstances[0].playbackRate, 0.9);
   assert.equal(harness.audioInstances[0].playCount, 2);
 
   harness.manager.clearAll();

@@ -13,7 +13,7 @@ export const VISITOR_SPEECH_RECOGNITION_OPTIONS = Object.freeze([
   Object.freeze({
     id: "kinyarwanda",
     title: "Better Kinyarwanda recognition",
-    helper: "Better for Rwandan names and local vocabulary.",
+    helper: "Better for Kinyarwanda names and local vocabulary.",
     recognitionLanguage: "Kinyarwanda",
   }),
 ]);

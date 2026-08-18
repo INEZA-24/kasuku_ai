@@ -115,7 +115,7 @@ test("SpeechRecognition uses the webkit fallback only when needed", () => {
   assert.equal(getSpeechRecognitionConstructor({}), null);
 });
 
-test("Visitor normal mode selects en-US recognition", () => {
+test("Speaker 1 normal mode selects en-US recognition", () => {
   assert.deepEqual(
     VISITOR_SPEECH_RECOGNITION_OPTIONS.map(({ id, title, helper }) => ({
       id,
@@ -131,7 +131,7 @@ test("Visitor normal mode selects en-US recognition", () => {
       {
         id: "kinyarwanda",
         title: "Better Kinyarwanda recognition",
-        helper: "Better for Rwandan names and local vocabulary.",
+        helper: "Better for Kinyarwanda names and local vocabulary.",
       },
     ],
   );
@@ -146,7 +146,7 @@ test("Visitor normal mode selects en-US recognition", () => {
   assert.equal(harness.recognition.lang, "en-US");
 });
 
-test("Visitor Kinyarwanda mode changes recognition locale without changing direction", () => {
+test("Speaker 1 Kinyarwanda mode changes recognition locale without changing direction", () => {
   const directionBefore = getLanguageDirection(
     "visitor",
     "English",
@@ -172,14 +172,14 @@ test("Visitor Kinyarwanda mode changes recognition locale without changing direc
   });
 });
 
-test("Visitor cancel choice has no recognition language and starts no session", () => {
+test("Speaker 1 cancel choice has no recognition language and starts no session", () => {
   const instanceCount = MockRecognition.instances.length;
 
   assert.equal(getVisitorSpeechRecognitionLanguage("cancel"), null);
   assert.equal(MockRecognition.instances.length, instanceCount);
 });
 
-test("Rwandan microphone bypasses the choice and remains rw-RW", () => {
+test("Speaker 2 microphone bypasses the choice and remains rw-RW", () => {
   const harness = createHarness("Kinyarwanda");
 
   harness.session.start();
