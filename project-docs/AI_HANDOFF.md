@@ -6,9 +6,9 @@ Kasuku
 
 ## Current milestone
 
-M8 — Error handling and resilience
+M10 — Full functional testing and release verification
 
-Status: M8 is implemented as of 2026-08-15 and awaiting real-browser resilience verification. All 62 automated tests and the production build pass. Translation, microphone, TTS, playback, timeout, offline, duplicate-request, stale-response, and clear-session failures now terminate in recoverable feature-local states without changing the M3–M7 interpretation, history, STT, direction, or provider behavior.
+Status: M10 is complete as of 2026-08-18. All 77 automated tests and the production build pass, live EjoChat checks passed in both English/Kinyarwanda directions and across all five contexts, live Kinyarwanda TTS reached Play and Replay without duplicate generation, and rendered Chrome checks passed for `/`, `/conversation`, onboarding, accessibility hooks, and the 320–1440px viewport matrix. No critical or high-severity functional regression is known. Real microphone hardware, browser-vendor `rw-RW` quality, and human audio/naturalness review remain explicit pre-deployment device checks.
 
 ## Completed work
 
@@ -447,6 +447,39 @@ Verification performed:
 - Headless Chrome rendered `/` and `/conversation` at 320px, 375px, 390px, 430px, and 1440px. Every viewport reported zero horizontal overflow, controls inside the viewport width, no Next.js error overlay, no numbered labels or removed hero copy, exact footer text, and no composer/message-canvas overlap.
 - The onboarding card was reopened and measured at all four mobile widths; it remained fully inside each viewport. Final human real-device visual confirmation remains pending.
 
+## M10 full functional testing and release verification
+
+Status: Complete. No critical or high-severity functional regression was found, so M10 required no product-code fix or architecture change.
+
+Test areas completed:
+
+- Core interpretation: live three-turn Transport conversation passed in both directions. Speaker 1's `I need a moto to Nyabugogo, but I need to stop at an ATM first.` became natural Kinyarwanda; Speaker 2's Kinyarwanda price question became `How much will that cost?`; switching back preserved the reference and produced a Kinyarwanda question rather than an answer.
+- Contexts: live requests returned controlled HTTP 200 interpretations for Transport, Restaurant / Food, Hotel / Accommodation, Shopping / Market, and General Conversation. Changing the selected context in the UI retained all three existing turns.
+- Interpretation intelligence: `amaseriveri ya Google arakomeye` produced `Google's servers are powerful.`; `Google is too far` remained about Google and was not rewritten to Nyabugogo.
+- Speech recognition: deterministic browser-adapter tests passed for Speaker 1 `en-US`, Speaker 1 optional `rw-RW`, direct Speaker 2 `rw-RW`, continuous/interim accumulation, long speech chunks, repeated sessions, editable non-auto-submitted transcripts, cancel, participant switch, clear, permission denial, no-speech, unavailable browser, capture/network failures, and recovery into a later session.
+- TTS: live Kinyarwanda background generation progressed from `Preparing voice...` to Play, Playing, Replay, and Playing on replay. Play/Replay added zero `/api/tts` generation requests. The reverse English-target turn exposed no Kinyarwanda Listen control. Automated tests additionally passed for Male voice, provider speed `0.9`, browser playback rate `0.9`, independent per-message caching, timeouts, retry, stale-result rejection, playback rejection recovery, and object-URL cleanup.
+- Translation resilience and races: deterministic failure-injection tests passed for offline fetch, provider failure, timeout, malformed/rate-limited response, immutable retry snapshots, duplicate submission, direction changes during requests, and Clear Conversation while translation is pending.
+- Landing and conversation routes: rendered Chrome confirmed `/` and `/conversation`, the parrot logo and app icon route, Rwanda-business copy, challenge/how anchors, zero numbered labels, exact Team NEXEL footer, actual Try Kasuku navigation, compact app header, Speaker 1/Speaker 2 labels, SVG direction/microphone controls, and no removed marketing hero or primary Visitor/Rwandan labels.
+- Onboarding: first visit, 1-of-4 progress, Next, Back, Skip, stored completion, no automatic repeat, manual reopen, Escape dismissal, and Start talking completion all passed in the rendered browser.
+- Responsive/accessibility/runtime: 320, 375, 390, 430, 768, and 1440px checks reported no horizontal overflow; composer, swap, microphone, footer, and onboarding stayed inside the viewport. Logo alt text, microphone and swap labels, keyboard focus with a visible 3px outline, busy/disabled interpretation states, and dialog semantics were present. No Next.js error overlay, browser console error/warning, failed request, hydration error, or unhandled rejection occurred during the successful release flow.
+- Security/configuration: the server reported only that `EJOCHAT_API_KEY` is configured; its value was never logged or sent to client code. Provider errors remain behind the existing safe route boundaries.
+
+Automated and build results:
+
+- `npm.cmd test`: 77/77 passed.
+- `npm.cmd run build`: passed; `/`, `/conversation`, and `/icon.png` are static, while `/api/translate` and `/api/tts` remain dynamic server routes.
+- No new automated test was added solely for test-count growth. The existing failure-injection suite already covered the non-hardware regressions in the M10 matrix; rendered and live-provider evidence supplemented it.
+
+Remaining real-device/manual checks:
+
+- Grant and deny microphone permission in current desktop Chrome and the target Android Chrome device; confirm cancel, no-speech, real audio capture, long pauses, and second/third sessions with physical microphone input.
+- Speak the supplied English and Kinyarwanda scenarios to assess vendor recognition quality, especially `rw-RW`, mixed-language words, Nyabugogo, Kigali Heights, and ATM. Browser support varies and cannot be proven by a headless runtime.
+- Listen through the target phone speaker and judge Male Kinyarwanda voice naturalness and the fixed `0.9` synthesis/playback pace; confirm playback-policy behavior after a sleeping Space wakes.
+- Repeat the viewport/onboarding pass on the actual target phone and any additional supported browser once the release browser matrix is finalized.
+- During M11, repeat translation/TTS smoke checks over the production HTTPS origin with production environment variables and inspect deployment logs for secret safety.
+
+Release decision: Kasuku is ready to begin M11 deployment once the user explicitly authorizes commit/push/deploy actions and the production environment is available. The remaining hardware and human-language checks are known release checks, not known critical code regressions.
+
 ## Known issues
 
 - The PowerShell execution policy blocks `npm.ps1`; use `npm.cmd` for npm commands on this machine.
@@ -479,4 +512,4 @@ Verification performed:
 
 ## Exact next step
 
-Complete M9 real-browser visual and accessibility review at the target viewport widths before planning any M10 work.
+M11 — GitHub/Vercel production deployment. Begin only after explicit authorization to commit, push, and deploy; configure protected production environment variables, deploy, and repeat the HTTPS interpretation, microphone, TTS, security, logging, and rollback smoke checks.
