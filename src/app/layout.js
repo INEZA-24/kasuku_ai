@@ -1,5 +1,7 @@
 import "./globals.css";
 
+import KasukuPhraseAssistant from "../components/kasuku-phrase-assistant.js";
+
 export const metadata = {
   title: {
     default: "Kasuku | Rwanda-focused contextual interpreter",
@@ -12,7 +14,10 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {children}
+        <KasukuPhraseAssistant />
+      </body>
     </html>
   );
 }
