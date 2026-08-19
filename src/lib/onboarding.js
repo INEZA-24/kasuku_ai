@@ -13,8 +13,13 @@ export const ONBOARDING_STEPS = Object.freeze([
   }),
   Object.freeze({
     target: "composer",
-    title: "Speak naturally",
-    text: "Use the microphone or type your message.",
+    title: "Speak or type naturally",
+    text: "Use the microphone or type your message. Speech recognition can vary depending on your browser, device, and pronunciation.",
+  }),
+  Object.freeze({
+    target: "assistant",
+    title: "Ask Kasuku when phrasing is difficult",
+    text: "If speech recognition is unclear or you are not sure how to phrase something, tap the Kasuku icon. Explain what you mean, mix languages if needed, and keep Kinyarwanda or local terms. Kasuku will suggest a clearer message that you can review before using it.",
   }),
   Object.freeze({
     target: "interpretation",
