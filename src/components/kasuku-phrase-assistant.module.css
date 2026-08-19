@@ -1,0 +1,264 @@
+.launcher {
+  display: grid;
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 1px solid #9fc3ae;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 6px 18px rgba(25, 57, 53, 0.08);
+}
+
+.launcher:hover,
+.launcher:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.launcher img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+
+.backdrop {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(16, 31, 28, 0.46);
+}
+
+.dialog {
+  width: min(100%, 560px);
+  max-height: min(88vh, 760px);
+  overflow-y: auto;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 22px 70px rgba(16, 31, 28, 0.24);
+}
+
+.headingRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.identity img {
+  flex: 0 0 auto;
+}
+
+.identity p {
+  margin: 0 0 2px;
+  color: var(--accent);
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.identity h2 {
+  margin: 0;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.3rem;
+  font-weight: 500;
+}
+
+.closeButton {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.45rem;
+  line-height: 1;
+}
+
+.closeButton:hover,
+.closeButton:focus-visible {
+  border-color: var(--line);
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.helperText {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 116px;
+  margin: 0;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fffdf7;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.generateButton,
+.primaryAction,
+.secondaryAction {
+  min-height: 42px;
+  border-radius: 9px;
+  font-weight: 800;
+}
+
+.generateButton {
+  width: 100%;
+  margin-top: 10px;
+  border: 0;
+  background: var(--accent-dark);
+  color: white;
+}
+
+.generateButton:hover:not(:disabled) {
+  background: #06464a;
+}
+
+.generateButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.suggestionCard {
+  margin-top: 18px;
+  padding: 15px;
+  border: 1px solid #bdd3c6;
+  border-radius: 11px;
+  background: var(--accent-soft);
+}
+
+.suggestionLabel {
+  margin: 0 0 8px;
+  color: var(--accent-dark);
+  font-size: 0.67rem;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.suggestionText {
+  margin: 0;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.03rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.primaryAction,
+.secondaryAction {
+  padding: 0 14px;
+}
+
+.primaryAction {
+  border: 0;
+  background: var(--accent-dark);
+  color: white;
+}
+
+.secondaryAction {
+  border: 1px solid #9fc3ae;
+  background: var(--surface);
+  color: var(--accent-dark);
+}
+
+.primaryAction:hover,
+.secondaryAction:hover {
+  filter: brightness(0.97);
+}
+
+.reviewNote,
+.feedback {
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.reviewNote {
+  margin: 10px 0 0;
+}
+
+.feedback {
+  margin: 12px 0 0;
+  font-weight: 700;
+}
+
+:global(.conversation-canvas) {
+  scroll-padding-bottom: 32px;
+}
+
+@media (max-width: 620px) {
+  .backdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .dialog {
+    width: 100%;
+    max-height: 90vh;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 16px 16px 0 0;
+    padding: 16px;
+  }
+
+  .launcher {
+    flex-basis: 46px;
+    width: 46px;
+    height: 46px;
+  }
+
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog,
+  .launcher {
+    transition: none;
+  }
+}
